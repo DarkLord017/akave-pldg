@@ -55,6 +55,7 @@ func decodeLog(log types.Log, eventName string, out interface{}) (*utils.Decoded
 		EventName:       eventName,
 		ContractAddress: log.Address,
 		BlockNumber:     log.BlockNumber,
+		BlockHash:       log.BlockHash,
 		TxHash:          log.TxHash,
 		LogIndex:        log.Index,
 		Topics:          log.Topics,

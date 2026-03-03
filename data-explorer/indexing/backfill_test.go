@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"data-explorer/config"
+	"data-explorer/database"
 	"data-explorer/utils"
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -60,7 +61,7 @@ func TestBackfill_InvalidRange(t *testing.T) {
 	cfg.FromBlock = 1000
 	cfg.ToBlock = 500 // from > to
 
-	err := Backfill(ctx, cfg, NoOpHandler)
+	err := Backfill(ctx, cfg, NoOpHandler, nil)
 	if err == nil {
 		t.Fatal("Backfill() expected error for invalid range, got nil")
 	}
@@ -77,7 +78,7 @@ func TestBackfill_ContextCancelled(t *testing.T) {
 	cfg.FromBlock = 0
 	cfg.ToBlock = 0 // will try GetBlockNumber first
 
-	err := Backfill(ctx, cfg, NoOpHandler)
+	err := Backfill(ctx, cfg, NoOpHandler, nil)
 	if err == nil {
 		t.Fatal("Backfill() expected error with cancelled context, got nil")
 	}
@@ -96,8 +97,46 @@ func TestBackfill_EmptyRange(t *testing.T) {
 	cfg.FromBlock = 1
 	cfg.ToBlock = 1
 
-	err := Backfill(ctx, cfg, NoOpHandler)
+	err := Backfill(ctx, cfg, NoOpHandler, nil)
 	if err == nil {
 		t.Fatal("Backfill() expected error (no RPC), got nil")
+	}
+}
+
+func TestBackfill_BatchHandler(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.DefaultBackfillConfig()
+	cfg.FromBlock = 0
+	cfg.ToBlock = 0
+
+	db, err := database.NewDB(database.DefaultConfig())
+	if err != nil {
+		t.Fatalf("failed to create database: %v", err)
+	}
+	defer db.Close()
+
+	batchHandler := DBHandler(db, "default")
+
+	totalBlocks := 100
+	cfg.FromBlock = 0
+	cfg.ToBlock = uint64(totalBlocks)
+
+	for i := 0; i < totalBlocks; i += 10 {
+		cfg.FromBlock = uint64(i)
+		cfg.ToBlock = uint64(i + 10)
+		err = Backfill(ctx, cfg, nil, batchHandler)
+		if err != nil {
+			t.Fatalf("failed to backfill: %v", err)
+		}
+	}
+
+	stats, err := db.GetStats(ctx)
+	if err != nil {
+		t.Fatalf("failed to get stats: %v", err)
+	}
+
+	// TODO : add better assertions
+	if stats["total_blocks"].(int64) > 0 {
+		t.Fatalf("total blocks = %d, want > 0", stats["total_blocks"].(int64))
 	}
 }

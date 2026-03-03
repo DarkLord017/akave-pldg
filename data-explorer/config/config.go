@@ -12,6 +12,7 @@ type BackfillConfig struct {
 	ToBlock         uint64 // 0 means use latest
 	ChunkSize       uint64 // blocks per eth_getLogs call
 	MaxRetry        int
+	ChainID         string // for indexing_state
 }
 
 // DefaultBackfillConfig returns config with sensible defaults.
@@ -23,5 +24,6 @@ func DefaultBackfillConfig() BackfillConfig {
 		ToBlock:         0,
 		ChunkSize:       2000,
 		MaxRetry:        3,
+		ChainID:         "default",
 	}
 }

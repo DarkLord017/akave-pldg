@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 type RpcUrl struct {
@@ -130,6 +131,7 @@ type DecodedEvent struct {
 	EventName       string                 `json:"event_name"`
 	ContractAddress common.Address         `json:"contract_address"`
 	BlockNumber     uint64                 `json:"block_number"`
+	BlockHash       common.Hash            `json:"block_hash"`
 	TxHash          common.Hash            `json:"tx_hash"`
 	LogIndex        uint                   `json:"log_index"`
 	Topics          []common.Hash          `json:"topics"`
@@ -142,6 +144,15 @@ type EventMeta struct {
 }
 
 // Transaction Structs
+
+type DecodedTx struct {
+	TxHash     common.Hash    `json:"tx_hash"`
+	MethodName string         `json:"method_name"` // placeholder for now
+	From       common.Address `json:"from"`
+	To         common.Address `json:"to"`
+	Params     interface{}    `json:"params"`
+	Value      *big.Int       `json:"value"`
+}
 
 type AddFileChunkTxParams struct {
 	ChunkCID         []byte        `json:"chunkCID"`
