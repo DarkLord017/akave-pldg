@@ -182,3 +182,51 @@ func (r *RpcUrl) GetBlockNumber(ctx context.Context, requestID int, maxRetry int
 	}
 	return blockNum, nil
 }
+
+// eth_getBlockByNumber result (subset of fields we need).
+type rpcBlockResult struct {
+	Number     string `json:"number"`
+	Hash       string `json:"hash"`
+	ParentHash string `json:"parentHash"`
+	Timestamp  string `json:"timestamp"`
+}
+
+// GetBlockByNumber fetches block metadata (hash, parentHash, timestamp) for the given block number.
+func (r *RpcUrl) GetBlockByNumber(ctx context.Context, requestID int, maxRetry int, blockNum uint64) (*Block, error) {
+	// "false" = do not return full transaction objects
+	body, err := json.Marshal([]interface{}{fmt.Sprintf("0x%x", blockNum), false})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal params: %w", err)
+	}
+	resp, err := r.MakeRequest(ctx, "eth_getBlockByNumber", requestID, maxRetry, body)
+	if err != nil {
+		return nil, fmt.Errorf("get block %d: %w", blockNum, err)
+	}
+	var raw json.RawMessage
+	if err := json.Unmarshal(resp.Result, &raw); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal result: %w", err)
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, fmt.Errorf("block %d not found", blockNum)
+	}
+	var res rpcBlockResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal block: %w", err)
+	}
+	var num uint64
+	if _, err := fmt.Sscanf(res.Number, "0x%x", &num); err != nil {
+		return nil, fmt.Errorf("invalid block number hex %q: %w", res.Number, err)
+	}
+	var ts uint64
+	if _, err := fmt.Sscanf(res.Timestamp, "0x%x", &ts); err != nil {
+		return nil, fmt.Errorf("invalid timestamp hex %q: %w", res.Timestamp, err)
+	}
+	hash := common.HexToHash(res.Hash)
+	parentHash := common.HexToHash(res.ParentHash)
+	return &Block{
+		Num:        int64(num),
+		Hash:       hash.Bytes(),
+		ParentHash: parentHash.Bytes(),
+		Timestamp:  time.Unix(int64(ts), 0),
+	}, nil
+}

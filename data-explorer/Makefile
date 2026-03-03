@@ -29,7 +29,7 @@ build:
 	@go build -o $(BIN_DIR)/$(APP_NAME) ./...
 
 test:
-	@go test ./...
+	@go test ./... -v -timeout 2m
 
 clean:
 	@rm -rf $(BIN_DIR)

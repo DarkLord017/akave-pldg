@@ -5,10 +5,10 @@ import (
 	"reflect"
 	"strings"
 
+	"data-explorer/utils"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"data-explorer/utils"
 )
 
 var (
@@ -55,6 +55,7 @@ func decodeLog(log types.Log, eventName string, out interface{}) (*utils.Decoded
 		EventName:       eventName,
 		ContractAddress: log.Address,
 		BlockNumber:     log.BlockNumber,
+		BlockHash:       log.BlockHash,
 		TxHash:          log.TxHash,
 		LogIndex:        log.Index,
 		Topics:          log.Topics,

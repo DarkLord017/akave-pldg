@@ -13,10 +13,15 @@ import (
 // EventHandler is called for each decoded event during backfill.
 type EventHandler func(ctx context.Context, ev *utils.DecodedEvent) error
 
+// BatchEventHandler is called with all decoded events from a chunk, the chunk end block, and block metadata for each distinct block in the chunk.
+// Use chunkEndBlock for indexing_state (last fully processed block). When blocks is non-nil, the handler should insert them into the blocks table.
+type BatchEventHandler func(ctx context.Context, events []*utils.DecodedEvent, chunkEndBlock int64, blocks []*utils.Block) error
+
 // Backfill runs eth_getLogs with event topic filters over the block range,
 // decodes each log, and invokes the handler. Uses chunked requests and
 // automatic range splitting for large responses.
-func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandler) error {
+// If batchHandler is non-nil, events are batched per chunk and passed to it; otherwise handler is called per event.
+func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandler, batchHandler BatchEventHandler) error {
 	rpc := utils.NewRpcUrl(cfg.RPCURL)
 	topics := utils.EventTopicFilters()
 
@@ -62,6 +67,7 @@ func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandl
 			return fmt.Errorf("GetLogs %d-%d: %w", start, end, err)
 		}
 
+		var batch []*utils.DecodedEvent
 		for i, raw := range rawLogs {
 			vLog, err := utils.RawLogToTypesLog(raw)
 			if err != nil {
@@ -74,9 +80,34 @@ func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandl
 				continue
 			}
 
-			if err := handler(ctx, decoded); err != nil {
-				return fmt.Errorf("handler for %s block %d tx %s: %w",
-					decoded.EventName, decoded.BlockNumber, decoded.TxHash, err)
+			if batchHandler != nil {
+				batch = append(batch, decoded)
+			} else if handler != nil {
+				if err := handler(ctx, decoded); err != nil {
+					return fmt.Errorf("handler for %s block %d tx %s: %w",
+						decoded.EventName, decoded.BlockNumber, decoded.TxHash, err)
+				}
+			}
+		}
+
+		if batchHandler != nil {
+			var blocks []*utils.Block
+			if len(batch) > 0 {
+				blockNums := make(map[uint64]struct{})
+				for _, ev := range batch {
+					blockNums[ev.BlockNumber] = struct{}{}
+				}
+				blocks = make([]*utils.Block, 0, len(blockNums))
+				for num := range blockNums {
+					b, err := rpc.GetBlockByNumber(ctx, 1, cfg.MaxRetry, num)
+					if err != nil {
+						return fmt.Errorf("get block %d: %w", num, err)
+					}
+					blocks = append(blocks, b)
+				}
+			}
+			if err := batchHandler(ctx, batch, int64(end), blocks); err != nil {
+				return fmt.Errorf("batch handler for blocks %d-%d: %w", start, end, err)
 			}
 		}
 
@@ -100,5 +131,18 @@ func LoggingHandler(ctx context.Context, ev *utils.DecodedEvent) error {
 		"tx", ev.TxHash,
 		"logIndex", ev.LogIndex,
 		"data", ev.Data)
+	return nil
+}
+
+// LoggingBatchHandler logs each event in the batch.
+func LoggingBatchHandler(ctx context.Context, events []*utils.DecodedEvent, _ int64, _ []*utils.Block) error {
+	for _, ev := range events {
+		slog.Info("event",
+			"name", ev.EventName,
+			"block", ev.BlockNumber,
+			"tx", ev.TxHash,
+			"logIndex", ev.LogIndex,
+			"data", ev.Data)
+	}
 	return nil
 }

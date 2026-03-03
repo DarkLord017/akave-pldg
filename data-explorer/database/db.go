@@ -129,7 +129,6 @@ func (db *DB) InsertTransaction(ctx context.Context, blockNum int64, blockHash [
 		blockNum,
 		blockHash,
 		tx.TxHash.Bytes(),
-		tx.TxIndex,
 		tx.From.Bytes(),
 		tx.To.Bytes(),
 		tx.To.Bytes(),
@@ -144,10 +143,19 @@ func (db *DB) InsertTransaction(ctx context.Context, blockNum int64, blockHash [
 }
 
 func (db *DB) UpdateEventsForTransaction(ctx context.Context, blockNum int64, txHash []byte, events []*utils.DecodedEvent) error {
-	eventsJSON, err := json.Marshal(events)
+	// Sanitize events before marshaling
+	sanitizedEvents := make([]*utils.DecodedEvent, len(events))
+	for i, ev := range events {
+		sanitizedEvents[i] = utils.SanitizeEvent(ev)
+	}
+
+	eventsJSON, err := json.Marshal(sanitizedEvents)
 	if err != nil {
 		return fmt.Errorf("failed to marshal events: %w", err)
 	}
+
+	// Sanitize JSON string
+	jsonStr := utils.SanitizeJSONString(string(eventsJSON))
 
 	query := `
 		SELECT pg_advisory_xact_lock(hashtext($1::text));
@@ -157,7 +165,7 @@ func (db *DB) UpdateEventsForTransaction(ctx context.Context, blockNum int64, tx
 			events = COALESCE(actions.events, '[]'::jsonb) || EXCLUDED.events
 	`
 
-	_, err = db.conn.ExecContext(ctx, query, string(txHash), blockNum, []byte{}, txHash, eventsJSON)
+	_, err = db.conn.ExecContext(ctx, query, string(txHash), blockNum, []byte{}, txHash, jsonStr)
 	if err != nil {
 		return fmt.Errorf("failed to update events: %w", err)
 	}
@@ -173,7 +181,14 @@ func (db *DB) InsertTransactionBatch(ctx context.Context, blockNum int64, blockH
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+
+	defer func() {
+		if err != nil {
+			if rbErr := tx.Rollback(); rbErr != nil {
+				err = fmt.Errorf("tx err: %v, rollback err: %w", err, rbErr)
+			}
+		}
+	}()
 
 	for _, decodedTx := range txs {
 		txParamsJSON, err := json.Marshal(decodedTx.Params)
@@ -209,7 +224,6 @@ func (db *DB) InsertTransactionBatch(ctx context.Context, blockNum int64, blockH
 			blockNum,
 			blockHash,
 			decodedTx.TxHash.Bytes(),
-			decodedTx.TxIndex,
 			decodedTx.From.Bytes(),
 			decodedTx.To.Bytes(),
 			decodedTx.To.Bytes(),
@@ -235,36 +249,158 @@ func (db *DB) UpdateEventsBatch(ctx context.Context, blockNum int64, eventsByTxH
 		return nil
 	}
 
-	tx, err := db.conn.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-for txHashStr, events := range eventsByTxHash {
-		eventsJSON, err := json.Marshal(events)
+	// Process each tx in its own transaction so one failure doesn't poison the batch
+	for txHashStr, events := range eventsByTxHash {
+		if len(events) == 0 {
+			continue
+		}
+
+		// Sanitize events before marshaling
+		sanitizedEvents := make([]*utils.DecodedEvent, len(events))
+		for i, ev := range events {
+			sanitizedEvents[i] = utils.SanitizeEvent(ev)
+		}
+
+		eventsJSON, err := json.Marshal(sanitizedEvents)
 		if err != nil {
 			return fmt.Errorf("failed to marshal events: %w", err)
 		}
 
+		// Validate JSON
+		if !json.Valid(eventsJSON) {
+			return fmt.Errorf("invalid JSON for tx %s", txHashStr)
+		}
+
+		// Validate JSON by parsing and re-marshaling to ensure it's valid
+		var testJSON interface{}
+		if err := json.Unmarshal(eventsJSON, &testJSON); err != nil {
+			log.Printf("Warning: JSON is invalid for tx %s: %v", txHashStr, err)
+			// Skip this transaction
+			continue
+		}
+
+		// Re-marshal to ensure clean, valid JSON
+		cleanJSON, err := json.Marshal(testJSON)
+		if err != nil {
+			log.Printf("Warning: failed to re-marshal JSON for tx %s: %v", txHashStr, err)
+			continue
+		}
+
+		// Final sanitization: replace control chars (\u0000-\u001F) with space
+		jsonStr := utils.SanitizeJSONString(string(cleanJSON))
+
+		first := events[0]
+		txHash := first.TxHash.Bytes()
+		blockHash := first.BlockHash.Bytes()
+		contract := first.ContractAddress.Bytes()
+
+		// Use parameterized query - lib/pq will handle the JSONB conversion
+		// Try using json.RawMessage type hint or ensure proper escaping
+		tx, err := db.conn.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction: %w", err)
+		}
+
 		query := `
-			SELECT pg_advisory_xact_lock(hashtext($1::text));
 			INSERT INTO actions (block_num, block_hash, tx_hash, tx_index, from_addr, to_addr, contract, events)
-			VALUES ($2, $3, $4, 0, $4, $4, $4, $5::jsonb)
+			VALUES ($1, $2, $3, 0, $4, $4, $4, $5::jsonb)
 			ON CONFLICT (block_num, tx_hash) DO UPDATE SET
 				events = COALESCE(actions.events, '[]'::jsonb) || EXCLUDED.events
 		`
-
-		_, err = tx.ExecContext(ctx, query, txHashStr, blockNum, []byte{}, []byte(txHashStr), string(eventsJSON
-		_, err = stmt.ExecContext(ctx, string(eventsJSON), blockNum, []byte(txHashStr))
+		_, err = tx.ExecContext(ctx, query, blockNum, blockHash, txHash, contract, jsonStr)
 		if err != nil {
-			return fmt.Errorf("failed to update events: %w", err)
+			if err := tx.Rollback(); err != nil {
+				log.Printf("Failed to rollback transaction: %v", err)
+			}
+			log.Printf("Skipping transaction %s (block %d) due to error: %v", txHashStr, blockNum, err)
+			continue
 		}
-	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit transaction: %w", err)
+		}
 	}
 
 	log.Printf("Updated events for %d transactions", len(eventsByTxHash))
 	return nil
+}
+
+func (db *DB) GetLastIndexedBlock(ctx context.Context, chainID string) (int64, error) {
+	query := `SELECT last_indexed FROM indexing_state WHERE chain_id = $1`
+	var last int64
+	err := db.conn.QueryRowContext(ctx, query, chainID).Scan(&last)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("failed to get last indexed block: %w", err)
+	}
+	return last, nil
+}
+
+func (db *DB) SetLastIndexedBlock(ctx context.Context, chainID string, blockNum int64) error {
+	query := `
+		INSERT INTO indexing_state (chain_id, last_indexed, head_seen, reorg_depth)
+		VALUES ($1, $2, $2, 12)
+		ON CONFLICT (chain_id) DO UPDATE SET
+			last_indexed = EXCLUDED.last_indexed,
+			head_seen = GREATEST(indexing_state.head_seen, EXCLUDED.head_seen),
+			updated_at = now()
+	`
+	_, err := db.conn.ExecContext(ctx, query, chainID, blockNum)
+	if err != nil {
+		return fmt.Errorf("failed to set last indexed block: %w", err)
+	}
+	return nil
+}
+
+// GetStats returns basic statistics about indexed data.
+func (db *DB) GetStats(ctx context.Context) (map[string]interface{}, error) {
+	stats := make(map[string]interface{})
+
+	// Total actions
+	var totalActions int64
+	err := db.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM actions`).Scan(&totalActions)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get total actions: %w", err)
+	}
+	stats["total_actions"] = totalActions
+
+	// Block range
+	var minBlock, maxBlock sql.NullInt64
+	err = db.conn.QueryRowContext(ctx, `SELECT MIN(block_num), MAX(block_num) FROM actions`).Scan(&minBlock, &maxBlock)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get block range: %w", err)
+	}
+	if minBlock.Valid {
+		stats["min_block"] = minBlock.Int64
+		stats["max_block"] = maxBlock.Int64
+	}
+
+	// Indexing state
+	var lastIndexed sql.NullInt64
+	err = db.conn.QueryRowContext(ctx, `SELECT MAX(last_indexed) FROM indexing_state`).Scan(&lastIndexed)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get last indexed: %w", err)
+	}
+	if lastIndexed.Valid {
+		stats["last_indexed"] = lastIndexed.Int64
+	}
+
+	// Unique transactions
+	var uniqueTxs int64
+	err = db.conn.QueryRowContext(ctx, `SELECT COUNT(DISTINCT tx_hash) FROM actions`).Scan(&uniqueTxs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get unique transactions: %w", err)
+	}
+	stats["unique_transactions"] = uniqueTxs
+
+	// Total blocks
+	var totalBlocks int64
+	err = db.conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM blocks`).Scan(&totalBlocks)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get total blocks: %w", err)
+	}
+	stats["total_blocks"] = totalBlocks
+	return stats, nil
 }
