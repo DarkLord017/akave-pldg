@@ -64,17 +64,43 @@ jobs:
       run:
         working-directory: data-explorer
 
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: indexer
+          POSTGRES_PASSWORD: indexer_password
+          POSTGRES_DB: blockchain_explorer
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U indexer -d blockchain_explorer"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: indexer
+      DB_PASSWORD: indexer_password
+      DB_NAME: blockchain_explorer
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: data-explorer/go.mod
 
-      - name: Go test
-        run: go test ./...
+      - name: Initialize database schema
+        run: |
+          PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f database/schema.sql
+        env:
+          PGPASSWORD: indexer_password
+
+      - name: Run tests
+        run: go test -v ./...
 
