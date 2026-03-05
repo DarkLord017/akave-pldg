@@ -71,7 +71,11 @@ func FetchStorageContractAddresses() ([]common.Address, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract list: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			fmt.Printf("failed to close response body: %v\n", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -80,11 +84,11 @@ func FetchStorageContractAddresses() ([]common.Address, error) {
 	var result struct {
 		Message string `json:"message"`
 		Result  []struct {
-			ABI 		   string `json:"ABI"`
-			Address string `json:"Address"`
-			ContractName    string `json:"ContractName"`
-			CompilerVersion string `json:"CompilerVersion"`
-			OptimizationUsed string   `json:"OptimizationUsed,omitempty"`
+			ABI              string `json:"ABI"`
+			Address          string `json:"Address"`
+			ContractName     string `json:"ContractName"`
+			CompilerVersion  string `json:"CompilerVersion"`
+			OptimizationUsed string `json:"OptimizationUsed,omitempty"`
 		} `json:"result"`
 		Status string `json:"status"`
 	}
@@ -93,10 +97,9 @@ func FetchStorageContractAddresses() ([]common.Address, error) {
 		return nil, fmt.Errorf("failed to decode response: %v", err)
 	}
 
-	var proxyAddresses []common.Address
 	var storageAddresses []common.Address
 	var storageBytecodes = make(map[string]common.Address) // bytecode -> storage address
-	
+
 	// First pass: collect storage addresses and their bytecodes
 	for _, contract := range result.Result {
 		if strings.Contains(contract.ContractName, "Storage") {
@@ -110,13 +113,12 @@ func FetchStorageContractAddresses() ([]common.Address, error) {
 			storageBytecodes[bytecode] = addr
 		}
 	}
-	
+
 	// Second pass: check proxy addresses
 	for _, contract := range result.Result {
 		if strings.Contains(contract.ContractName, "Proxy") {
 			addr := common.HexToAddress(contract.Address)
-			proxyAddresses = append(proxyAddresses, addr)
-			impl_address , err := GetImplementationAddress(addr)
+			impl_address, err := GetImplementationAddress(addr)
 			if err != nil {
 				fmt.Printf("Failed to get implementation address for proxy %s: %v\n", contract.Address, err)
 				continue
@@ -135,7 +137,7 @@ func FetchStorageContractAddresses() ([]common.Address, error) {
 			}
 		}
 	}
-	
+
 	fmt.Printf("Fetched storage contract addresses: %v\n", storageAddresses)
 	return storageAddresses, nil
 }

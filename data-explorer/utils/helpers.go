@@ -130,7 +130,7 @@ func SanitizeString(s string) string {
 				hexPart := s[i+2 : i+6]
 				valid := true
 				for _, c := range hexPart {
-					if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+					if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 						valid = false
 						break
 					}
@@ -164,7 +164,7 @@ func SanitizeJSONString(jsonStr string) string {
 				hexPart := jsonStr[i+2 : i+6]
 				valid := true
 				for _, c := range hexPart {
-					if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+					if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 						valid = false
 						break
 					}
