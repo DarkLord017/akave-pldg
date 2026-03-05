@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+
 func TestNoOpHandler(t *testing.T) {
 	ctx := context.Background()
 
