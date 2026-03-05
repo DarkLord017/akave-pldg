@@ -402,5 +402,6 @@ func (db *DB) GetStats(ctx context.Context) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to get total blocks: %w", err)
 	}
 	stats["total_blocks"] = totalBlocks
+
 	return stats, nil
 }

@@ -2,7 +2,11 @@ package utils
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -53,4 +57,95 @@ var rpc = NewRpcUrl(akave_rpc)
 
 func GetRPCURL() string {
 	return rpc.GetUrl()
+}
+
+// GetCodeAtAddress fetches bytecode for a given address using eth_getCode RPC call.
+func GetCodeAtAddress(address common.Address) (string, error) {
+	ctx := context.Background()
+	return rpc.GetCodeAtAddress(ctx, 1, 3, address)
+}
+
+func FetchStorageContractAddresses() ([]common.Address, error) {
+	var api_url = "https://explorer.akave.ai/api?module=contract&action=listcontracts&page=1&offset=100"
+	resp, err := http.Get(api_url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch contract list: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Message string `json:"message"`
+		Result  []struct {
+			ABI 		   string `json:"ABI"`
+			Address string `json:"Address"`
+			ContractName    string `json:"ContractName"`
+			CompilerVersion string `json:"CompilerVersion"`
+			OptimizationUsed string   `json:"OptimizationUsed,omitempty"`
+		} `json:"result"`
+		Status string `json:"status"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	var proxyAddresses []common.Address
+	var storageAddresses []common.Address
+	var storageBytecodes = make(map[string]common.Address) // bytecode -> storage address
+	
+	// First pass: collect storage addresses and their bytecodes
+	for _, contract := range result.Result {
+		if strings.Contains(contract.ContractName, "Storage") {
+			addr := common.HexToAddress(contract.Address)
+			storageAddresses = append(storageAddresses, addr)
+			bytecode, err := GetCodeAtAddress(addr)
+			if err != nil {
+				fmt.Printf("Failed to get code for storage address %s: %v\n", contract.Address, err)
+				continue
+			}
+			storageBytecodes[bytecode] = addr
+		}
+	}
+	
+	// Second pass: check proxy addresses
+	for _, contract := range result.Result {
+		if strings.Contains(contract.ContractName, "Proxy") {
+			addr := common.HexToAddress(contract.Address)
+			proxyAddresses = append(proxyAddresses, addr)
+			impl_address , err := GetImplementationAddress(addr)
+			if err != nil {
+				fmt.Printf("Failed to get implementation address for proxy %s: %v\n", contract.Address, err)
+				continue
+			}
+			impl_bytecode, err := GetCodeAtAddress(impl_address)
+			if err != nil {
+				fmt.Printf("Failed to get code for proxy address %s: %v\n", contract.Address, err)
+				continue
+			}
+			// Check if this proxy's bytecode matches any storage bytecode
+			if storageAddr, found := storageBytecodes[impl_bytecode]; found {
+				storageAddresses = append(storageAddresses, addr)
+				fmt.Printf("Matched proxy %s to storage %s\n", contract.Address, storageAddr.Hex())
+			} else {
+				fmt.Printf("Proxy %s does not match any storage bytecode\n", contract.Address)
+			}
+		}
+	}
+	
+	fmt.Printf("Fetched storage contract addresses: %v\n", storageAddresses)
+	return storageAddresses, nil
+}
+
+func GetImplementationAddress(proxyAddr common.Address) (common.Address, error) {
+	// EIP-1967 implementation slot: bytes32(uint256(keccak256('eip1967.proxy.implementation')) - 1)
+	slot := common.HexToHash("0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc")
+	implBytes, err := rpc.GetStorageAt(context.Background(), 1, 3, proxyAddr, slot, "latest")
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to get storage at slot: %v", err)
+	}
+	return common.BytesToAddress(common.FromHex(implBytes)), nil
 }

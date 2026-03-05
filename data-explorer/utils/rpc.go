@@ -20,11 +20,11 @@ var errBlockRangeTooLarge = errors.New("block range too large")
 // basically we will map error range to messages to decode the error and if the error was rate limit exceed we retry with full range but if the error was
 // block range too large we will split the range and retry with smaller ranges until we get a successful response or we hit the minimum range threshold
 // please do not change the logic of this function without understanding the above point as it is crucial for the performance of the indexer and also to avoid hitting rate limits frequently
-func (r *RpcUrl) MakeRequest(ctx context.Context, method string, request_id int, max_retry int, body []byte) (*JSONRPCResponse, error) {
+func (r *RpcUrl) MakeRequest(ctx context.Context, method string, request_id int, max_retry int, body interface{}) (*JSONRPCResponse, error) {
 	payload := JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  method,
-		Params:  json.RawMessage(body),
+		Params:  body,
 		ID:      request_id,
 	}
 
@@ -47,7 +47,7 @@ func (r *RpcUrl) MakeRequest(ctx context.Context, method string, request_id int,
 
 		if resp.StatusCode != http.StatusOK {
 			_ = resp.Body.Close()
-			return nil, fmt.Errorf("HTTP request returned non-200 status: %d", resp.StatusCode)
+			return nil, errBlockRangeTooLarge
 		}
 
 		result := JSONRPCResponse{}
@@ -55,6 +55,7 @@ func (r *RpcUrl) MakeRequest(ctx context.Context, method string, request_id int,
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode JSON-RPC response: %v", err)
 		}
+		_ = resp.Body.Close()
 
 		if result.Error != nil {
 			if result.Error.Code >= -33000 {
@@ -62,12 +63,12 @@ func (r *RpcUrl) MakeRequest(ctx context.Context, method string, request_id int,
 				fmt.Printf("Rate limit exceeded, retrying... Attempt %d/%d\n", i+1, max_retry)
 				time.Sleep(time.Duration(1<<i) * time.Second) // Exponential backoff
 				continue
-			} else if result.Error.Code != -32005 {
-				// Handle other errors
-				return nil, fmt.Errorf("JSON-RPC error: %v", result.Error.Message)
-			} else {
-				// block range too large error, we will handle it in the calling function by splitting the range and retrying with smaller ranges
+			} else if result.Error.Code == -32005 && method == "eth_getLogs" {
+				// block range too large error (only for eth_getLogs), we will handle it in the calling function
 				return nil, errBlockRangeTooLarge
+			} else {
+				// Handle other errors
+				return nil, fmt.Errorf("JSON-RPC error [code %d]: %v", result.Error.Code, result.Error.Message)
 			}
 		}
 		return &result, nil
@@ -75,21 +76,16 @@ func (r *RpcUrl) MakeRequest(ctx context.Context, method string, request_id int,
 	return nil, errors.New("max retries exceeded")
 }
 
-func (r *RpcUrl) GetLogs(ctx context.Context, request_id int, max_retry int, start int, end int, address common.Address, topics [][]string) ([]json.RawMessage, error) {
+func (r *RpcUrl) GetLogs(ctx context.Context, request_id int, max_retry int, start int, end int, address []common.Address, topics [][]string) ([]json.RawMessage, error) {
 	params := []map[string]interface{}{
 		{
 			"fromBlock": fmt.Sprintf("0x%x", start),
 			"toBlock":   fmt.Sprintf("0x%x", end),
-			"address":   address.Hex(),
+			"address":   address,
 			"topics":    topics,
 		},
 	}
-
-	body, err := json.Marshal(params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal params: %v", err)
-	}
-	resp, retryErr := r.MakeRequest(ctx, "eth_getLogs", request_id, max_retry, body)
+	resp, retryErr := r.MakeRequest(ctx, "eth_getLogs", request_id, max_retry, params)
 	if retryErr == nil {
 		var logs []json.RawMessage
 		if err := json.Unmarshal(resp.Result, &logs); err != nil {
@@ -164,11 +160,8 @@ func RawLogToTypesLog(raw json.RawMessage) (types.Log, error) {
 
 // GetBlockNumber returns the latest block number from the chain.
 func (r *RpcUrl) GetBlockNumber(ctx context.Context, requestID int, maxRetry int) (uint64, error) {
-	body, err := json.Marshal([]interface{}{})
-	if err != nil {
-		return 0, fmt.Errorf("failed to marshal params: %w", err)
-	}
-	resp, err := r.MakeRequest(ctx, "eth_blockNumber", requestID, maxRetry, body)
+	params := []interface{}{}
+	resp, err := r.MakeRequest(ctx, "eth_blockNumber", requestID, maxRetry, params)
 	if err != nil {
 		return 0, err
 	}
@@ -194,11 +187,8 @@ type rpcBlockResult struct {
 // GetBlockByNumber fetches block metadata (hash, parentHash, timestamp) for the given block number.
 func (r *RpcUrl) GetBlockByNumber(ctx context.Context, requestID int, maxRetry int, blockNum uint64) (*Block, error) {
 	// "false" = do not return full transaction objects
-	body, err := json.Marshal([]interface{}{fmt.Sprintf("0x%x", blockNum), false})
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal params: %w", err)
-	}
-	resp, err := r.MakeRequest(ctx, "eth_getBlockByNumber", requestID, maxRetry, body)
+	params := []interface{}{fmt.Sprintf("0x%x", blockNum), false}
+	resp, err := r.MakeRequest(ctx, "eth_getBlockByNumber", requestID, maxRetry, params)
 	if err != nil {
 		return nil, fmt.Errorf("get block %d: %w", blockNum, err)
 	}
@@ -229,4 +219,31 @@ func (r *RpcUrl) GetBlockByNumber(ctx context.Context, requestID int, maxRetry i
 		ParentHash: parentHash.Bytes(),
 		Timestamp:  time.Unix(int64(ts), 0),
 	}, nil
+}
+
+// GetCodeAtAddress fetches the bytecode at a given address using eth_getCode.
+func (r *RpcUrl) GetCodeAtAddress(ctx context.Context, requestID int, maxRetry int, address common.Address) (string, error) {
+	body := []interface{}{address.Hex(), "latest"}
+	resp, err := r.MakeRequest(ctx, "eth_getCode", requestID, maxRetry, body)
+	if err != nil {
+		return "", fmt.Errorf("get code for address %s: %w", address.Hex(), err)
+	}
+	var code string
+	if err := json.Unmarshal(resp.Result, &code); err != nil {
+		return "", fmt.Errorf("failed to unmarshal code: %w", err)
+	}
+	return code, nil
+}
+
+func (r *RpcUrl) GetStorageAt(ctx context.Context, requestID int, maxRetry int, address common.Address, slot common.Hash, block string) (string, error) {
+	body := []interface{}{address.Hex(), slot.Hex(), block}
+	resp, err := r.MakeRequest(ctx, "eth_getStorageAt", requestID, maxRetry, body)
+	if err != nil {
+		return "", fmt.Errorf("get storage at address %s slot %s: %w", address.Hex(), slot.Hex(), err)
+	}
+	var value string
+	if err := json.Unmarshal(resp.Result, &value); err != nil {
+		return "", fmt.Errorf("failed to unmarshal storage value: %w", err)
+	}
+	return value, nil
 }

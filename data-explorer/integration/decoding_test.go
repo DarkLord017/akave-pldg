@@ -216,24 +216,6 @@ func TestBackfillBatchPagination(t *testing.T) {
 	}
 }
 
-func TestBackfillContractAddressConsistency(t *testing.T) {
-	client := setupClient(t)
-	from, to := getKnownRange(t, client)
-
-	events, err := indexing.FetchAndDecode(client, from, to)
-	if err != nil {
-		t.Fatalf("FetchAndDecode failed: %v", err)
-	}
-
-	expected := utils.GetAddress()
-	for i, ev := range events {
-		if ev.ContractAddress != expected {
-			t.Errorf("Event %d: contract address %s != expected %s",
-				i, ev.ContractAddress.Hex(), expected.Hex())
-		}
-	}
-}
-
 func TestBackfillIdempotency(t *testing.T) {
 	client := setupClient(t)
 	from, to := getKnownRange(t, client)

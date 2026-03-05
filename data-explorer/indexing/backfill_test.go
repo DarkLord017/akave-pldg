@@ -130,13 +130,9 @@ func TestBackfill_BatchHandler(t *testing.T) {
 		}
 	}
 
-	stats, err := db.GetStats(ctx)
-	if err != nil {
-		t.Fatalf("failed to get stats: %v", err)
-	}
+	stats, err := db.GetLastIndexedBlock(ctx , "default")
 
-	// TODO : add better assertions
-	if stats["total_blocks"].(int64) > 0 {
-		t.Fatalf("total blocks = %d, want > 0", stats["total_blocks"].(int64))
+	if stats != int64(totalBlocks) {
+		t.Errorf("expected last indexed block %d, got %d", totalBlocks, stats)
 	}
 }
