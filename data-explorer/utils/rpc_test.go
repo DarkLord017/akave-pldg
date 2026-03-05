@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"testing"
 	"time"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 func GetLogs(t *testing.T, start int, end int) {
@@ -15,7 +13,10 @@ func GetLogs(t *testing.T, start int, end int) {
 	// Example parameters for GetLogs
 	request_id := 1
 	max_retry := 3
-	address := common.HexToAddress("0xbFAbD47bF901ca1341D128DDD06463AA476E970B")
+	address, err := FetchStorageContractAddresses()
+	if err != nil {
+		t.Fatalf("Failed to fetch storage contract addresses: %v", err)
+	}
 	topics := [][]string{}
 	logs, err := rpc.GetLogs(ctx, request_id, max_retry, start, end, address, topics)
 	if err != nil {

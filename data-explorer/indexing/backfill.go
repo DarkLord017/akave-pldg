@@ -48,7 +48,7 @@ func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandl
 
 	slog.Info("backfill started",
 		"from", from, "to", to, "chunkSize", chunkSize,
-		"contract", cfg.ContractAddress.Hex())
+		"contract", cfg.ContractAddresses[0].Hex())
 
 	for start := from; start <= to; start += chunkSize {
 		select {
@@ -62,7 +62,7 @@ func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandl
 			end = to
 		}
 
-		rawLogs, err := rpc.GetLogs(ctx, 1, cfg.MaxRetry, start, end, cfg.ContractAddress, topics)
+		rawLogs, err := rpc.GetLogs(ctx, 1, cfg.MaxRetry, start, end, cfg.ContractAddresses, topics)
 		if err != nil {
 			return fmt.Errorf("GetLogs %d-%d: %w", start, end, err)
 		}

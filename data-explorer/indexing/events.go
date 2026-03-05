@@ -16,26 +16,29 @@ var contractAddress common.Address = utils.GetAddress()
 
 func FetchAndDecode(client *ethclient.Client, fromBlock, toBlock int64) ([]*utils.DecodedEvent, error) {
 	rpc := utils.NewRpcUrl(utils.GetRPCURL())
-	rawChunks, err := rpc.GetLogs(context.Background(), 1, 3, int(fromBlock), int(toBlock), contractAddress, nil)
+	addresses, err := utils.FetchStorageContractAddresses()
+	if err != nil {
+		return nil, fmt.Errorf("Failed to fetch storage contract addresses: %v", err)
+	}
+	rawChunks, err := rpc.GetLogs(context.Background(), 1, 3, int(fromBlock), int(toBlock), addresses, nil)
+	println(len(rawChunks))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch logs via RPC: %v", err)
 	}
 
 	var decodedEvents []*utils.DecodedEvent
 	for _, chunk := range rawChunks {
-		var logs []types.Log
-		if err := json.Unmarshal(chunk, &logs); err != nil {
+		var log types.Log
+		if err := json.Unmarshal(chunk, &log); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal log chunk: %v", err)
 		}
 
-		for _, log := range logs {
-			decoded, err := decoding.DecodeAnyLog(log)
-			if err != nil {
-				fmt.Printf("failed to decode log at block %d: %v\n", log.BlockNumber, err)
-				continue
-			}
-			decodedEvents = append(decodedEvents, decoded)
+		decoded, err := decoding.DecodeAnyLog(log)
+		if err != nil {
+			fmt.Printf("failed to decode log at block %d: %v\n", log.BlockNumber, err)
+			continue
 		}
+		decodedEvents = append(decodedEvents, decoded)
 	}
 
 	return decodedEvents, nil
