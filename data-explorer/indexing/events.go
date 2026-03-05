@@ -18,7 +18,7 @@ func FetchAndDecode(client *ethclient.Client, fromBlock, toBlock int64) ([]*util
 	rpc := utils.NewRpcUrl(utils.GetRPCURL())
 	addresses, err := utils.FetchStorageContractAddresses()
 	if err != nil {
-		return nil, fmt.Errorf("Failed to fetch storage contract addresses: %v", err)
+		return nil, fmt.Errorf("failed to fetch storage contract addresses: %v", err)
 	}
 	rawChunks, err := rpc.GetLogs(context.Background(), 1, 3, int(fromBlock), int(toBlock), addresses, nil)
 	println(len(rawChunks))

@@ -7,6 +7,7 @@ import (
 	"data-explorer/config"
 	"data-explorer/database"
 	"data-explorer/utils"
+
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -113,7 +114,11 @@ func TestBackfill_BatchHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create database: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Logf("failed to close database: %v", err)
+		}
+	}()
 
 	batchHandler := DBHandler(db, "default")
 
@@ -130,7 +135,10 @@ func TestBackfill_BatchHandler(t *testing.T) {
 		}
 	}
 
-	stats, err := db.GetLastIndexedBlock(ctx , "default")
+	stats, err := db.GetLastIndexedBlock(ctx, "default")
+	if err != nil {
+		t.Fatalf("failed to get last indexed block: %v", err)
+	}
 
 	if stats != int64(totalBlocks) {
 		t.Errorf("expected last indexed block %d, got %d", totalBlocks, stats)
