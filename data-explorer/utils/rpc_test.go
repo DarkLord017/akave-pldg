@@ -68,3 +68,21 @@ func TestGetLogs(t *testing.T) {
 		fmt.Printf("%s took %v\n", c.name, after.Sub(before))
 	}
 }
+
+func TestGetBlockNumber(t *testing.T) {
+	ctx := context.Background()
+	blockNumber, err := rpc.GetBlockNumber(ctx, 1, 3)
+	if err != nil {
+		t.Fatalf("GetBlockNumber failed: %v", err)
+	}
+	fmt.Printf("Latest Block Number: %d\n", blockNumber)
+}
+
+func TestBlockAndTxns(t *testing.T) {
+	ctx := context.Background()
+	txns , err := rpc.GetBlockAndTransactions(ctx, 1, 3, 1278075)
+	if err != nil {
+		t.Fatalf("GetBlockAndTransactions failed: %v", err)
+	}
+	fmt.Printf("Transactions in Block 1278075: %d\n", len(txns))
+}

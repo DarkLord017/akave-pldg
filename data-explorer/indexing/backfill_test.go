@@ -143,4 +143,14 @@ func TestBackfill_BatchHandler(t *testing.T) {
 	if stats != int64(totalBlocks) {
 		t.Errorf("expected last indexed block %d, got %d", totalBlocks, stats)
 	}
+
+	//check events data in db 
+	events , err := db.GetEventsByBlockRange(ctx, 0, int64(totalBlocks))
+	if err != nil {
+		t.Fatalf("failed to get events by block range: %v", err)
+	}
+
+	if len(events) == 0 {
+		t.Errorf("expected some events in the database, got 0")
+	}
 }

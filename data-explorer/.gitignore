@@ -2,3 +2,9 @@ venv/
 .env
 .DS_Store
 bin/
+
+**/*.abi
+**/*.bin
+# Ignore common build folders at any level
+**/build/
+**/artifacts/

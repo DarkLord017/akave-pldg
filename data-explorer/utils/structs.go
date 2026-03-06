@@ -30,6 +30,54 @@ type Block struct {
 	Timestamp  time.Time
 }
 
+// RPCBlock represents a full Ethereum block from JSON-RPC response
+type RPCBlock struct {
+	Difficulty       string   `json:"difficulty"`
+	ExtraData        string   `json:"extraData"`
+	GasLimit         string   `json:"gasLimit"`
+	GasUsed          string   `json:"gasUsed"`
+	Hash             string   `json:"hash"`
+	LogsBloom        string   `json:"logsBloom"`
+	Miner            string   `json:"miner"`
+	MixHash          string   `json:"mixHash"`
+	Nonce            string   `json:"nonce"`
+	Number           string   `json:"number"`
+	ParentHash       string   `json:"parentHash"`
+	ReceiptsRoot     string   `json:"receiptsRoot"`
+	Sha3Uncles       string   `json:"sha3Uncles"`
+	Size             string   `json:"size"`
+	StateRoot        string   `json:"stateRoot"`
+	Timestamp        string   `json:"timestamp"`
+	TotalDifficulty  string   `json:"totalDifficulty"`
+	Transactions     []*RPCTransaction `json:"transactions"` // Can be []string or []RPCTransaction depending on params
+	TransactionsRoot string   `json:"transactionsRoot"`
+	Uncles           []string `json:"uncles"`
+}
+
+// RPCTransaction represents a full Ethereum transaction from JSON-RPC response
+type RPCTransaction struct {
+	AccessList           []interface{} `json:"accessList,omitempty"`           // EIP-2930 access list
+	BlockHash            string        `json:"blockHash"`
+	BlockNumber          string        `json:"blockNumber"`
+	ChainID              string        `json:"chainId,omitempty"`
+	From                 string        `json:"from"`
+	Gas                  string        `json:"gas"`
+	GasPrice             string        `json:"gasPrice"`
+	Hash                 string        `json:"hash"`
+	Input                string        `json:"input"`
+	MaxFeePerGas         string        `json:"maxFeePerGas,omitempty"`         // EIP-1559
+	MaxPriorityFeePerGas string        `json:"maxPriorityFeePerGas,omitempty"` // EIP-1559
+	Nonce                string        `json:"nonce"`
+	R                    string        `json:"r"` // Signature R
+	S                    string        `json:"s"` // Signature S
+	To                   string        `json:"to"`
+	TransactionIndex     string        `json:"transactionIndex"`
+	Type                 string        `json:"type"`    // 0x0=legacy, 0x1=EIP-2930, 0x2=EIP-1559
+	V                    string        `json:"v"`       // Signature V
+	Value                string        `json:"value"`
+	YParity              string        `json:"yParity,omitempty"` // EIP-2930/1559
+}
+
 type JSONRPCRequest struct {
 	JSONRPC string      `json:"jsonrpc"`
 	Method  string      `json:"method"`
