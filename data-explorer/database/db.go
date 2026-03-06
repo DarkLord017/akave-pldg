@@ -406,7 +406,6 @@ func (db *DB) GetStats(ctx context.Context) (map[string]interface{}, error) {
 	return stats, nil
 }
 
-
 func (db *DB) GetEventsByBlockRange(ctx context.Context, fromBlock int64, toBlock int64) ([]*utils.DecodedEvent, error) {
 	query := `
 		SELECT events
@@ -417,7 +416,11 @@ func (db *DB) GetEventsByBlockRange(ctx context.Context, fromBlock int64, toBloc
 	if err != nil {
 		return nil, fmt.Errorf("failed to query events: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Error closing rows: %v", closeErr)
+		}
+	}()
 
 	var allEvents []*utils.DecodedEvent
 	for rows.Next() {
