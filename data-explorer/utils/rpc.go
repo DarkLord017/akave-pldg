@@ -247,3 +247,53 @@ func (r *RpcUrl) GetStorageAt(ctx context.Context, requestID int, maxRetry int, 
 	}
 	return value, nil
 }
+
+func (r *RpcUrl) GetBlockAndTransactions(
+	ctx context.Context,
+	requestID int,
+	maxRetry int,
+	blockNum uint64,
+) ([]*RPCTransaction, error) {
+
+	params := []interface{}{
+		fmt.Sprintf("0x%x", blockNum),
+		true, // return full transaction objects
+	}
+
+	resp, err := r.MakeRequest(ctx, "eth_getBlockByNumber", requestID, maxRetry, params)
+	if err != nil {
+		return nil, fmt.Errorf("get block %d: %w", blockNum, err)
+	}
+
+	var block RPCBlock
+	if err := json.Unmarshal(resp.Result, &block); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal block: %w", err)
+	}
+
+	// Optional: parse block number
+	var num uint64
+	if _, err := fmt.Sscanf(block.Number, "0x%x", &num); err != nil {
+		return nil, fmt.Errorf("invalid block number %s: %w", block.Number, err)
+	}
+
+	// Optional: parse timestamp
+	var ts uint64
+	if _, err := fmt.Sscanf(block.Timestamp, "0x%x", &ts); err != nil {
+		return nil, fmt.Errorf("invalid timestamp %s: %w", block.Timestamp, err)
+	}
+
+	return block.Transactions, nil
+}
+
+func (r *RpcUrl) GetTransactionByHash(ctx context.Context, requestID int, maxRetry int, txHash common.Hash) (*RPCTransaction, error) {
+	body := []interface{}{txHash.Hex()}
+	resp, err := r.MakeRequest(ctx, "eth_getTransactionByHash", requestID, maxRetry, body)
+	if err != nil {
+		return nil, fmt.Errorf("get transaction by hash %s: %w", txHash.Hex(), err)
+	}
+	var tx RPCTransaction
+	if err := json.Unmarshal(resp.Result, &tx); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal result: %w", err)
+	}
+	return &tx, nil
+}

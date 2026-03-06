@@ -405,3 +405,39 @@ func (db *DB) GetStats(ctx context.Context) (map[string]interface{}, error) {
 
 	return stats, nil
 }
+
+
+func (db *DB) GetEventsByBlockRange(ctx context.Context, fromBlock int64, toBlock int64) ([]*utils.DecodedEvent, error) {
+	query := `
+		SELECT events
+		FROM actions
+		WHERE block_num >= $1 AND block_num <= $2
+	`
+	rows, err := db.conn.QueryContext(ctx, query, fromBlock, toBlock)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query events: %w", err)
+	}
+	defer rows.Close()
+
+	var allEvents []*utils.DecodedEvent
+	for rows.Next() {
+		var eventsJSON []byte
+		if err := rows.Scan(&eventsJSON); err != nil {
+			return nil, fmt.Errorf("failed to scan events: %w", err)
+		}
+
+		var events []*utils.DecodedEvent
+		if err := json.Unmarshal(eventsJSON, &events); err != nil {
+			log.Printf("Warning: failed to unmarshal events JSON: %v", err)
+			continue
+		}
+
+		allEvents = append(allEvents, events...)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	return allEvents, nil
+}
