@@ -288,3 +288,10 @@ type UpgradeToAndCallTxParams struct {
 	NewImplementation common.Address `json:"newImplementation"`
 	Data              []byte         `json:"data"`
 }
+
+// DecodedBlock represents a chain block plus all successfully decoded
+// contract transactions within it.
+type DecodedBlock struct {
+	Block *Block  `json:"block"`
+	Txs   []*DecodedTx  `json:"txs"`
+}

@@ -4,19 +4,83 @@ import (
 	"data-explorer/utils"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"reflect"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-type DecodedTx struct {
-	MethodName string         `json:"method_name"`
-	From       common.Address `json:"from"`
-	To         common.Address `json:"to"`
-	Params     interface{}    `json:"params"`
-	Value      *big.Int       `json:"value"`
+// normalizeArgsForJSON converts [32]byte and [20]byte values in the map to hex
+// strings so that json.Unmarshal can populate common.Hash and common.Address
+// (which expect hex strings, not byte arrays).
+func normalizeArgsForJSON(m map[string]interface{}) {
+	for k, v := range m {
+		m[k] = normalizeVal(v)
+	}
+}
+
+func normalizeVal(v interface{}) interface{} {
+	if v == nil {
+		return v
+	}
+	switch val := v.(type) {
+	case [32]byte:
+		return common.Hash(val).Hex()
+	case [20]byte:
+		return common.Address(val).Hex()
+	case [][32]byte:
+		out := make([]string, len(val))
+		for i, b := range val {
+			out[i] = common.Hash(b).Hex()
+		}
+		return out
+	case [][][32]byte:
+		out := make([][]string, len(val))
+		for i, inner := range val {
+			innerOut := make([]string, len(inner))
+			for j, b := range inner {
+				innerOut[j] = common.Hash(b).Hex()
+			}
+			out[i] = innerOut
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(val))
+		for i, e := range val {
+			out[i] = normalizeVal(e)
+		}
+		return out
+	case map[string]interface{}:
+		normalizeArgsForJSON(val)
+		return val
+	default:
+		// Struct from ABI (e.g. FillChunkBlockArgs tuple) - recurse on fields
+		rv := reflect.ValueOf(v)
+		if rv.Kind() == reflect.Struct {
+			out := make(map[string]interface{})
+			typ := rv.Type()
+			for i := 0; i < rv.NumField(); i++ {
+				f := rv.Field(i)
+				if f.CanInterface() {
+					jsonTag := typ.Field(i).Tag.Get("json")
+					name := strings.Split(jsonTag, ",")[0]
+					if name == "" || name == "-" {
+						// ABI structs use PascalCase; our target expects camelCase
+						n := typ.Field(i).Name
+						if len(n) > 0 {
+							name = strings.ToLower(n[:1]) + n[1:]
+						} else {
+							name = n
+						}
+					}
+					out[name] = normalizeVal(f.Interface())
+				}
+			}
+			return out
+		}
+		return v
+	}
 }
 
 type txMeta struct {
@@ -60,14 +124,7 @@ func init() {
 	}
 }
 
-func DecodeTransaction(tx *types.Transaction) (*DecodedTx, error) {
-	var to common.Address
-	txTo := tx.To()
-	if txTo == nil || *txTo != utils.GetAddress() {
-		return nil, nil
-	}
-	to = *txTo
-
+func DecodeTransaction(tx *types.Transaction, from common.Address, to common.Address) (*utils.DecodedTx, error) {
 	txData := tx.Data()
 	if len(txData) < 4 {
 		return nil, fmt.Errorf("no method selector")
@@ -96,6 +153,9 @@ func DecodeTransaction(tx *types.Transaction) (*DecodedTx, error) {
 		return nil, err
 	}
 
+	// Convert [32]byte and [20]byte to hex strings so json.Unmarshal works with common.Hash/common.Address
+	normalizeArgsForJSON(argsMap)
+
 	jsonBytes, err := json.Marshal(argsMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal args map: %w", err)
@@ -108,14 +168,8 @@ func DecodeTransaction(tx *types.Transaction) (*DecodedTx, error) {
 	}
 	args := reflect.ValueOf(params).Elem().Interface()
 
-	var from common.Address
-	signer := types.LatestSignerForChainID(tx.ChainId())
-	from, err = types.Sender(signer, tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to recover sender: %w", err)
-	}
-
-	return &DecodedTx{
+	return &utils.DecodedTx{
+		TxHash:     tx.Hash(),
 		MethodName: meta.name,
 		From:       from,
 		To:         to,

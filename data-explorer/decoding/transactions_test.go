@@ -25,7 +25,7 @@ func TestDecodeTransaction(t *testing.T) {
 		name      string
 		setupTx   func() *types.Transaction
 		expectErr bool
-		check     func(*testing.T, *DecodedTx)
+		check     func(*testing.T, *utils.DecodedTx)
 	}{
 		{
 			name: "Success - CreateBucket",
@@ -49,7 +49,7 @@ func TestDecodeTransaction(t *testing.T) {
 				return signedTx
 			},
 			expectErr: false,
-			check: func(t *testing.T, decoded *DecodedTx) {
+			check: func(t *testing.T, decoded *utils.DecodedTx) {
 				if decoded == nil {
 					t.Fatal("expected decoded tx, got nil")
 				}
@@ -78,7 +78,7 @@ func TestDecodeTransaction(t *testing.T) {
 				return tx
 			},
 			expectErr: false,
-			check: func(t *testing.T, decoded *DecodedTx) {
+			check: func(t *testing.T, decoded *utils.DecodedTx) {
 				if decoded != nil {
 					t.Errorf("expected nil for wrong address, got %v", decoded)
 				}
@@ -91,7 +91,7 @@ func TestDecodeTransaction(t *testing.T) {
 				return tx
 			},
 			expectErr: true,
-			check: func(t *testing.T, decoded *DecodedTx) {
+			check: func(t *testing.T, decoded *utils.DecodedTx) {
 				if decoded != nil {
 					t.Errorf("expected nil for error case, got %v", decoded)
 				}
@@ -104,7 +104,7 @@ func TestDecodeTransaction(t *testing.T) {
 				return tx
 			},
 			expectErr: true,
-			check: func(t *testing.T, decoded *DecodedTx) {
+			check: func(t *testing.T, decoded *utils.DecodedTx) {
 				if decoded != nil {
 					t.Errorf("expected nil for error case, got %v", decoded)
 				}
@@ -115,7 +115,18 @@ func TestDecodeTransaction(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tx := tt.setupTx()
-			decoded, err := DecodeTransaction(tx)
+			from, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			to := tx.To()
+			if to == nil {
+				t.Fatal("to address is nil")
+			}
+			decoded, err := DecodeTransaction(tx, from, *to)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if (err != nil) != tt.expectErr {
 				t.Errorf("expected error: %v, got: %v", tt.expectErr, err)
 			}
