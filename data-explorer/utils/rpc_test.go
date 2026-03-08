@@ -80,7 +80,7 @@ func TestGetBlockNumber(t *testing.T) {
 
 func TestBlockAndTxns(t *testing.T) {
 	ctx := context.Background()
-	txns , err := rpc.GetBlockAndTransactions(ctx, 1, 3, 1278075)
+	txns, err := rpc.GetBlockAndTransactions(ctx, 1, 3, 1278075)
 	if err != nil {
 		t.Fatalf("GetBlockAndTransactions failed: %v", err)
 	}

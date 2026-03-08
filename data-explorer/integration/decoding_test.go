@@ -2,13 +2,67 @@ package integration
 
 import (
 	"context"
-	"data-explorer/indexing"
-	"data-explorer/utils"
 	"testing"
 
+	"data-explorer/decoding"
+	"data-explorer/indexing"
+	"data-explorer/utils"
+
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
+
+// Known Akave testnet block used for deterministic integration tests (https://explorer.akave.ai/block/1370734).
+const testBlockNumber = 1370734
+
+// https://explorer.akave.ai/tx/0x11ff40024763f2f161f76330a2a29ea00fedf13466d03bd97283e7a3c633fbf7
+var testTransactionHashes = []string{"0x11ff40024763f2f161f76330a2a29ea00fedf13466d03bd97283e7a3c633fbf7", "0x6e835f48c8cc45c9bce02f1204f9fb232cfb44557c99a946ac29d88b3abe8ebc", "0xe7ad1f254397115c3eafa9319b40aab855b76d424f393943a78f65dc618d167f"}
+
+// setupTestTransaction builds signed tx that target the storage contract and decode as
+func setupTestTransactions(t *testing.T, client *ethclient.Client) []*types.Transaction {
+	t.Helper()
+	testTx, isPending, err := client.TransactionByHash(context.Background(), common.HexToHash(testTransactionHashes[0]))
+	if err != nil {
+		t.Fatalf("Failed to get test transaction: %v", err)
+	}
+	if isPending {
+		t.Fatalf("Test transaction is pending")
+	}
+
+	receipt, err := client.TransactionReceipt(context.Background(), testTx.Hash())
+	if err != nil {
+		t.Fatalf("Failed to get test transaction receipt: %v", err)
+	}
+	if receipt.Status != types.ReceiptStatusSuccessful {
+		t.Fatalf("Test transaction failed")
+	}
+
+	return []*types.Transaction{testTx}
+}
+
+// TestDecodeTestTransactions decodes the tx from the known test transaction
+func TestDecodeTestTransactions(t *testing.T) {
+	client := setupClient(t)
+	testTxs := setupTestTransactions(t, client)
+	for _, testTx := range testTxs {
+		t.Logf("test tx: hash=%s to=%s", testTx.Hash().Hex(), (testTx.To()).Hex())
+
+		from, err := types.Sender(types.LatestSignerForChainID(testTx.ChainId()), testTx)
+		if err != nil {
+			t.Fatalf("Failed to get sender: %v", err)
+		}
+		to := testTx.To()
+		if to == nil {
+			t.Fatalf("Failed to get to address: %v", err)
+		}
+		decoded, err := decoding.DecodeTransaction(testTx, from, *to)
+		if err != nil {
+			t.Fatalf("Failed to decode transaction: %v", err)
+		}
+		t.Logf("decoded: method=%s from=%s", decoded.MethodName, decoded.From.Hex())
+	}
+}
 
 func setupClient(t *testing.T) *ethclient.Client {
 	t.Helper()

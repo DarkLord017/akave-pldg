@@ -32,31 +32,31 @@ type Block struct {
 
 // RPCBlock represents a full Ethereum block from JSON-RPC response
 type RPCBlock struct {
-	Difficulty       string   `json:"difficulty"`
-	ExtraData        string   `json:"extraData"`
-	GasLimit         string   `json:"gasLimit"`
-	GasUsed          string   `json:"gasUsed"`
-	Hash             string   `json:"hash"`
-	LogsBloom        string   `json:"logsBloom"`
-	Miner            string   `json:"miner"`
-	MixHash          string   `json:"mixHash"`
-	Nonce            string   `json:"nonce"`
-	Number           string   `json:"number"`
-	ParentHash       string   `json:"parentHash"`
-	ReceiptsRoot     string   `json:"receiptsRoot"`
-	Sha3Uncles       string   `json:"sha3Uncles"`
-	Size             string   `json:"size"`
-	StateRoot        string   `json:"stateRoot"`
-	Timestamp        string   `json:"timestamp"`
-	TotalDifficulty  string   `json:"totalDifficulty"`
+	Difficulty       string            `json:"difficulty"`
+	ExtraData        string            `json:"extraData"`
+	GasLimit         string            `json:"gasLimit"`
+	GasUsed          string            `json:"gasUsed"`
+	Hash             string            `json:"hash"`
+	LogsBloom        string            `json:"logsBloom"`
+	Miner            string            `json:"miner"`
+	MixHash          string            `json:"mixHash"`
+	Nonce            string            `json:"nonce"`
+	Number           string            `json:"number"`
+	ParentHash       string            `json:"parentHash"`
+	ReceiptsRoot     string            `json:"receiptsRoot"`
+	Sha3Uncles       string            `json:"sha3Uncles"`
+	Size             string            `json:"size"`
+	StateRoot        string            `json:"stateRoot"`
+	Timestamp        string            `json:"timestamp"`
+	TotalDifficulty  string            `json:"totalDifficulty"`
 	Transactions     []*RPCTransaction `json:"transactions"` // Can be []string or []RPCTransaction depending on params
-	TransactionsRoot string   `json:"transactionsRoot"`
-	Uncles           []string `json:"uncles"`
+	TransactionsRoot string            `json:"transactionsRoot"`
+	Uncles           []string          `json:"uncles"`
 }
 
 // RPCTransaction represents a full Ethereum transaction from JSON-RPC response
 type RPCTransaction struct {
-	AccessList           []interface{} `json:"accessList,omitempty"`           // EIP-2930 access list
+	AccessList           []interface{} `json:"accessList,omitempty"` // EIP-2930 access list
 	BlockHash            string        `json:"blockHash"`
 	BlockNumber          string        `json:"blockNumber"`
 	ChainID              string        `json:"chainId,omitempty"`
@@ -72,8 +72,8 @@ type RPCTransaction struct {
 	S                    string        `json:"s"` // Signature S
 	To                   string        `json:"to"`
 	TransactionIndex     string        `json:"transactionIndex"`
-	Type                 string        `json:"type"`    // 0x0=legacy, 0x1=EIP-2930, 0x2=EIP-1559
-	V                    string        `json:"v"`       // Signature V
+	Type                 string        `json:"type"` // 0x0=legacy, 0x1=EIP-2930, 0x2=EIP-1559
+	V                    string        `json:"v"`    // Signature V
 	Value                string        `json:"value"`
 	YParity              string        `json:"yParity,omitempty"` // EIP-2930/1559
 }
@@ -287,4 +287,11 @@ type SetAuthorityTxParams struct {
 type UpgradeToAndCallTxParams struct {
 	NewImplementation common.Address `json:"newImplementation"`
 	Data              []byte         `json:"data"`
+}
+
+// DecodedBlock represents a chain block plus all successfully decoded
+// contract transactions within it.
+type DecodedBlock struct {
+	Block *Block       `json:"block"`
+	Txs   []*DecodedTx `json:"txs"`
 }

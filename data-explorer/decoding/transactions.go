@@ -2,22 +2,12 @@ package decoding
 
 import (
 	"data-explorer/utils"
-	"encoding/json"
 	"fmt"
-	"math/big"
 	"reflect"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
-
-type DecodedTx struct {
-	MethodName string         `json:"method_name"`
-	From       common.Address `json:"from"`
-	To         common.Address `json:"to"`
-	Params     interface{}    `json:"params"`
-	Value      *big.Int       `json:"value"`
-}
 
 type txMeta struct {
 	name    string
@@ -60,14 +50,7 @@ func init() {
 	}
 }
 
-func DecodeTransaction(tx *types.Transaction) (*DecodedTx, error) {
-	var to common.Address
-	txTo := tx.To()
-	if txTo == nil || *txTo != utils.GetAddress() {
-		return nil, nil
-	}
-	to = *txTo
-
+func DecodeTransaction(tx *types.Transaction, from common.Address, to common.Address) (*utils.DecodedTx, error) {
 	txData := tx.Data()
 	if len(txData) < 4 {
 		return nil, fmt.Errorf("no method selector")
@@ -90,32 +73,19 @@ func DecodeTransaction(tx *types.Transaction) (*DecodedTx, error) {
 		return nil, fmt.Errorf("failed to get method: %w", err)
 	}
 
-	argsMap := make(map[string]interface{})
-	err = method.Inputs.UnpackIntoMap(argsMap, txData[4:])
+	values, err := method.Inputs.Unpack(txData[4:])
 	if err != nil {
-		return nil, err
-	}
-
-	jsonBytes, err := json.Marshal(argsMap)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal args map: %w", err)
+		return nil, fmt.Errorf("failed to unpack %s inputs: %w", meta.name, err)
 	}
 
 	params := meta.factory()
-	err = json.Unmarshal(jsonBytes, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal into %s params: %w", meta.name, err)
+	if err := method.Inputs.Copy(params, values); err != nil {
+		return nil, fmt.Errorf("failed to copy into %s params: %w", meta.name, err)
 	}
 	args := reflect.ValueOf(params).Elem().Interface()
 
-	var from common.Address
-	signer := types.LatestSignerForChainID(tx.ChainId())
-	from, err = types.Sender(signer, tx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to recover sender: %w", err)
-	}
-
-	return &DecodedTx{
+	return &utils.DecodedTx{
+		TxHash:     tx.Hash(),
 		MethodName: meta.name,
 		From:       from,
 		To:         to,
