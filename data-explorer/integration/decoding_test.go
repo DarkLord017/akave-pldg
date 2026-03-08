@@ -17,7 +17,7 @@ import (
 const testBlockNumber = 1370734
 
 // https://explorer.akave.ai/tx/0x11ff40024763f2f161f76330a2a29ea00fedf13466d03bd97283e7a3c633fbf7
-var testTransactionHashes = []string{"0x11ff40024763f2f161f76330a2a29ea00fedf13466d03bd97283e7a3c633fbf7", "0x6e835f48c8cc45c9bce02f1204f9fb232cfb44557c99a946ac29d88b3abe8ebc","0xe7ad1f254397115c3eafa9319b40aab855b76d424f393943a78f65dc618d167f"}
+var testTransactionHashes = []string{"0x11ff40024763f2f161f76330a2a29ea00fedf13466d03bd97283e7a3c633fbf7", "0x6e835f48c8cc45c9bce02f1204f9fb232cfb44557c99a946ac29d88b3abe8ebc", "0xe7ad1f254397115c3eafa9319b40aab855b76d424f393943a78f65dc618d167f"}
 
 // setupTestTransaction builds signed tx that target the storage contract and decode as
 func setupTestTransactions(t *testing.T, client *ethclient.Client) []*types.Transaction {

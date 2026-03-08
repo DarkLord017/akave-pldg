@@ -71,11 +71,7 @@ func FetchStorageContractAddresses() ([]common.Address, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch contract list: %v", err)
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			fmt.Printf("failed to close response body: %v\n", err)
-		}
-	}()
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
@@ -107,7 +103,6 @@ func FetchStorageContractAddresses() ([]common.Address, error) {
 			storageAddresses = append(storageAddresses, addr)
 			bytecode, err := GetCodeAtAddress(addr)
 			if err != nil {
-				fmt.Printf("Failed to get code for storage address %s: %v\n", contract.Address, err)
 				continue
 			}
 			storageBytecodes[bytecode] = addr
@@ -120,25 +115,18 @@ func FetchStorageContractAddresses() ([]common.Address, error) {
 			addr := common.HexToAddress(contract.Address)
 			impl_address, err := GetImplementationAddress(addr)
 			if err != nil {
-				fmt.Printf("Failed to get implementation address for proxy %s: %v\n", contract.Address, err)
 				continue
 			}
 			impl_bytecode, err := GetCodeAtAddress(impl_address)
 			if err != nil {
-				fmt.Printf("Failed to get code for proxy address %s: %v\n", contract.Address, err)
 				continue
 			}
-			// Check if this proxy's bytecode matches any storage bytecode
-			if storageAddr, found := storageBytecodes[impl_bytecode]; found {
+			if _, found := storageBytecodes[impl_bytecode]; found {
 				storageAddresses = append(storageAddresses, addr)
-				fmt.Printf("Matched proxy %s to storage %s\n", contract.Address, storageAddr.Hex())
-			} else {
-				fmt.Printf("Proxy %s does not match any storage bytecode\n", contract.Address)
 			}
 		}
 	}
 
-	fmt.Printf("Fetched storage contract addresses: %v\n", storageAddresses)
 	return storageAddresses, nil
 }
 

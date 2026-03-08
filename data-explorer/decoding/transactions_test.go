@@ -1,25 +1,45 @@
 package decoding
 
 import (
-	"data-explorer/utils"
 	"math/big"
 	"testing"
 
+	storage "data-explorer/integration/contracts"
+	"data-explorer/utils"
+
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient/simulated"
 )
 
-func TestDecodeTransaction(t *testing.T) {
-	contractABI := utils.GetABI()
-	contractAddress := utils.GetAddress()
-	chainId := big.NewInt(1)
-
-	privKey, err := crypto.GenerateKey()
+// setupSimulatedStorage deploys the storage contract on a simulated backend (same pattern as integration/setup_contracts_test.go).
+func setupSimulatedStorage(t *testing.T) (*simulated.Backend, *storage.Storage, common.Address, *bind.TransactOpts) {
+	t.Helper()
+	key, err := crypto.GenerateKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	fromAddress := crypto.PubkeyToAddress(privKey.PublicKey)
+	chainID := big.NewInt(1337)
+	auth, err := bind.NewKeyedTransactorWithChainID(key, chainID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	balance := new(big.Int).Mul(big.NewInt(10), big.NewInt(1e18))
+	alloc := types.GenesisAlloc{auth.From: {Balance: balance}}
+	sim := simulated.NewBackend(alloc, simulated.WithBlockGasLimit(8000000))
+
+	contractAddr, _, instance, err := storage.DeployStorage(auth, sim.Client())
+	if err != nil {
+		t.Fatalf("deploy storage: %v", err)
+	}
+	sim.Commit()
+	return sim, instance, contractAddr, auth
+}
+
+func TestDecodeTransaction(t *testing.T) {
+	_, instance, contractAddress, auth := setupSimulatedStorage(t)
 
 	tests := []struct {
 		name      string
@@ -28,25 +48,13 @@ func TestDecodeTransaction(t *testing.T) {
 		check     func(*testing.T, *utils.DecodedTx)
 	}{
 		{
-			name: "Success - CreateBucket",
+			name: "Success - CreateBucket (storage binding)",
 			setupTx: func() *types.Transaction {
-				method, err := contractABI.MethodById(contractABI.Methods["createBucket"].ID)
+				tx, err := instance.CreateBucket(auth, "test-bucket")
 				if err != nil {
-					t.Fatal(err)
+					t.Fatalf("CreateBucket: %v", err)
 				}
-				data, err := method.Inputs.Pack("test-bucket")
-				if err != nil {
-					t.Fatal(err)
-				}
-				txData := append(contractABI.Methods["createBucket"].ID, data...)
-
-				tx := types.NewTransaction(0, contractAddress, big.NewInt(0), 100000, big.NewInt(1), txData)
-				signer := types.LatestSignerForChainID(chainId)
-				signedTx, err := types.SignTx(tx, signer, privKey)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return signedTx
+				return tx
 			},
 			expectErr: false,
 			check: func(t *testing.T, decoded *utils.DecodedTx) {
@@ -56,8 +64,8 @@ func TestDecodeTransaction(t *testing.T) {
 				if decoded.MethodName != "createBucket" {
 					t.Errorf("expected createBucket, got %s", decoded.MethodName)
 				}
-				if decoded.From != fromAddress {
-					t.Errorf("expected from %s, got %s", fromAddress.Hex(), decoded.From.Hex())
+				if decoded.From != auth.From {
+					t.Errorf("expected from %s, got %s", auth.From.Hex(), decoded.From.Hex())
 				}
 				if decoded.To != contractAddress {
 					t.Errorf("expected to %s, got %s", contractAddress.Hex(), decoded.To.Hex())
@@ -72,41 +80,59 @@ func TestDecodeTransaction(t *testing.T) {
 			},
 		},
 		{
-			name: "Wrong contract address",
+			name: "Wrong contract address (unknown selector)",
 			setupTx: func() *types.Transaction {
+				key, _ := crypto.GenerateKey()
+				signer := types.LatestSignerForChainID(big.NewInt(1337))
 				tx := types.NewTransaction(0, common.HexToAddress("0x123"), big.NewInt(0), 100000, big.NewInt(1), []byte{1, 2, 3, 4})
-				return tx
+				signed, err := types.SignTx(tx, signer, key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return signed
 			},
-			expectErr: false,
+			expectErr: true,
 			check: func(t *testing.T, decoded *utils.DecodedTx) {
 				if decoded != nil {
-					t.Errorf("expected nil for wrong address, got %v", decoded)
+					t.Errorf("expected nil, got %v", decoded)
 				}
 			},
 		},
 		{
 			name: "No method selector",
 			setupTx: func() *types.Transaction {
+				key, _ := crypto.GenerateKey()
+				signer := types.LatestSignerForChainID(big.NewInt(1337))
 				tx := types.NewTransaction(0, contractAddress, big.NewInt(0), 100000, big.NewInt(1), []byte{1, 2, 3})
-				return tx
+				signed, err := types.SignTx(tx, signer, key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return signed
 			},
 			expectErr: true,
 			check: func(t *testing.T, decoded *utils.DecodedTx) {
 				if decoded != nil {
-					t.Errorf("expected nil for error case, got %v", decoded)
+					t.Errorf("expected nil, got %v", decoded)
 				}
 			},
 		},
 		{
 			name: "Unknown method",
 			setupTx: func() *types.Transaction {
+				key, _ := crypto.GenerateKey()
+				signer := types.LatestSignerForChainID(big.NewInt(1337))
 				tx := types.NewTransaction(0, contractAddress, big.NewInt(0), 100000, big.NewInt(1), []byte{1, 2, 3, 4, 5})
-				return tx
+				signed, err := types.SignTx(tx, signer, key)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return signed
 			},
 			expectErr: true,
 			check: func(t *testing.T, decoded *utils.DecodedTx) {
 				if decoded != nil {
-					t.Errorf("expected nil for error case, got %v", decoded)
+					t.Errorf("expected nil, got %v", decoded)
 				}
 			},
 		},
@@ -124,11 +150,14 @@ func TestDecodeTransaction(t *testing.T) {
 				t.Fatal("to address is nil")
 			}
 			decoded, err := DecodeTransaction(tx, from, *to)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if (err != nil) != tt.expectErr {
-				t.Errorf("expected error: %v, got: %v", tt.expectErr, err)
+			if tt.expectErr {
+				if err == nil {
+					t.Errorf("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			if tt.check != nil {
 				tt.check(t, decoded)

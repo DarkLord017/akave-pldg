@@ -50,5 +50,3 @@ func DBHandler(db *database.DB, chainID string) BatchEventHandler {
 		return nil
 	}
 }
-
-
