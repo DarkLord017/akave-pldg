@@ -4,18 +4,33 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
 	"data-explorer/config"
 	"data-explorer/decoding"
 	"data-explorer/utils"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // EventHandler is called for each decoded event during backfill.
 type EventHandler func(ctx context.Context, ev *utils.DecodedEvent) error
 
-// BatchEventHandler is called with all decoded events from a chunk, the chunk end block, and block metadata for each distinct block in the chunk.
-// Use chunkEndBlock for indexing_state (last fully processed block). When blocks is non-nil, the handler should insert them into the blocks table.
-type BatchEventHandler func(ctx context.Context, events []*utils.DecodedEvent, chunkEndBlock int64, blocks []*utils.Block) error
+// BatchEventHandler is called once per chunk with:
+//   - events:      all decoded contract events (logs) in the chunk
+//   - decodedTxs:  all successfully decoded contract transactions in those blocks
+//   - failedTxs:   transactions that could not be decoded (saved for later retry)
+//   - chunkEndBlock: last block number in the chunk (use for indexing_state)
+//   - blocks:      metadata for every block that contained at least one event
+type BatchEventHandler func(
+	ctx context.Context,
+	events []*utils.DecodedEvent,
+	decodedTxs []*utils.DecodedTx,
+	failedTxs []*utils.FailedTx,
+	chunkEndBlock int64,
+	blocks []*utils.Block,
+) error
 
 // Backfill runs eth_getLogs with event topic filters over the block range,
 // decodes each log, and invokes the handler. Uses chunked requests and
@@ -47,8 +62,7 @@ func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandl
 	}
 
 	slog.Info("backfill started",
-		"from", from, "to", to, "chunkSize", chunkSize,
-		"contract", cfg.ContractAddresses[0].Hex())
+		"from", from, "to", to, "chunkSize", chunkSize, "contractAddrs", len(cfg.ContractAddresses))
 
 	for start := from; start <= to; start += chunkSize {
 		select {
@@ -92,21 +106,50 @@ func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandl
 
 		if batchHandler != nil {
 			var blocks []*utils.Block
+			var decodedTxs []*utils.DecodedTx
+			var failedTxs []*utils.FailedTx
+
 			if len(batch) > 0 {
+				// Collect the unique block numbers that had matching events.
 				blockNums := make(map[uint64]struct{})
 				for _, ev := range batch {
 					blockNums[ev.BlockNumber] = struct{}{}
 				}
+
 				blocks = make([]*utils.Block, 0, len(blockNums))
 				for num := range blockNums {
-					b, err := rpc.GetBlockByNumber(ctx, 1, cfg.MaxRetry, num)
+					// Single RPC call: fetch block metadata AND full tx list.
+					b, rpcTxs, err := rpc.GetBlockWithTransactions(ctx, 1, cfg.MaxRetry, num)
 					if err != nil {
 						return fmt.Errorf("get block %d: %w", num, err)
 					}
 					blocks = append(blocks, b)
+
+					// Decode every transaction in this block.
+					blockHash := common.BytesToHash(b.Hash)
+					for _, rpcTx := range rpcTxs {
+						dtx, err := decoding.DecodeRPCTransaction(rpcTx)
+						if err != nil {
+							if isPermanentDecodeError(err) {
+								// tx does not target our contract — skip silently.
+								continue
+							}
+							// Real decode failure — record for retry.
+							failedTxs = append(failedTxs, &utils.FailedTx{
+								TxHash:      common.HexToHash(rpcTx.Hash),
+								BlockNum:    b.Num,
+								BlockHash:   blockHash,
+								ErrorReason: fmt.Sprintf("decode tx: %v", err),
+							})
+							continue
+						}
+						dtx.BlockNum = b.Num
+						decodedTxs = append(decodedTxs, dtx)
+					}
 				}
 			}
-			if err := batchHandler(ctx, batch, int64(end), blocks); err != nil {
+
+			if err := batchHandler(ctx, batch, decodedTxs, failedTxs, int64(end), blocks); err != nil {
 				return fmt.Errorf("batch handler for blocks %d-%d: %w", start, end, err)
 			}
 		}
@@ -116,6 +159,63 @@ func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandl
 
 	slog.Info("backfill completed", "from", from, "to", to)
 	return nil
+}
+
+// LiveIndexing continuously polls for new blocks starting from lastBlock+1,
+// reusing the same contract address list fetched once at startup.
+// It polls every 5 seconds when caught up, and processes new blocks as they arrive.
+func LiveIndexing(ctx context.Context, rpcURL string, handler EventHandler, batchHandler BatchEventHandler, lastBlock int, chunkSize int) error {
+	contractAddresses, err := utils.FetchStorageContractAddresses()
+	if err != nil {
+		return fmt.Errorf("live indexing: fetch contract addresses: %w", err)
+	}
+
+	rpc := utils.NewRpcUrl(rpcURL)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		latest, err := rpc.GetBlockNumber(ctx, 1, 3)
+		if err != nil {
+			slog.Warn("live indexing: failed to get latest block, retrying", "err", err)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
+			continue
+		}
+
+		if uint64(lastBlock) >= latest {
+			// Caught up — wait for a new block.
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
+			continue
+		}
+
+		cfg := config.BackfillConfig{
+			RPCURL:            rpcURL,
+			FromBlock:         uint64(lastBlock + 1),
+			ToBlock:           latest,
+			ChunkSize:         uint64(chunkSize),
+			MaxRetry:          3,
+			ContractAddresses: contractAddresses,
+		}
+
+		slog.Info("live indexing: processing new blocks", "from", lastBlock+1, "to", latest)
+		if err := Backfill(ctx, cfg, handler, batchHandler); err != nil {
+			return fmt.Errorf("live indexing: backfill %d-%d: %w", lastBlock+1, latest, err)
+		}
+
+		lastBlock = int(latest)
+	}
 }
 
 // NoOpHandler is a no-op EventHandler for testing or dry runs.
@@ -134,8 +234,8 @@ func LoggingHandler(ctx context.Context, ev *utils.DecodedEvent) error {
 	return nil
 }
 
-// LoggingBatchHandler logs each event in the batch.
-func LoggingBatchHandler(ctx context.Context, events []*utils.DecodedEvent, _ int64, _ []*utils.Block) error {
+// LoggingBatchHandler logs events, decoded txs, and failed txs in the batch.
+func LoggingBatchHandler(ctx context.Context, events []*utils.DecodedEvent, decodedTxs []*utils.DecodedTx, failedTxs []*utils.FailedTx, _ int64, _ []*utils.Block) error {
 	for _, ev := range events {
 		slog.Info("event",
 			"name", ev.EventName,
@@ -144,5 +244,26 @@ func LoggingBatchHandler(ctx context.Context, events []*utils.DecodedEvent, _ in
 			"logIndex", ev.LogIndex,
 			"data", ev.Data)
 	}
+	for _, tx := range decodedTxs {
+		slog.Info("decoded tx",
+			"method", tx.MethodName,
+			"from", tx.From,
+			"tx", tx.TxHash)
+	}
+	for _, ft := range failedTxs {
+		slog.Warn("failed tx",
+			"tx", ft.TxHash,
+			"block", ft.BlockNum,
+			"reason", ft.ErrorReason)
+	}
 	return nil
+}
+
+// isPermanentDecodeError returns true when a tx decode error means the transaction
+// was never targeting our storage contract and should be silently skipped.
+func isPermanentDecodeError(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "unknown method selector") ||
+		strings.Contains(msg, "no method selector") ||
+		strings.Contains(msg, "no input data")
 }

@@ -1,13 +1,37 @@
 package utils
 
 import (
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math/big"
-
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
+
+// HexBytes is a []byte that JSON-encodes as a "0x"-prefixed hex string
+// instead of base64, matching Ethereum conventions.
+type HexBytes []byte
+
+func (h HexBytes) MarshalJSON() ([]byte, error) {
+	return json.Marshal("0x" + hex.EncodeToString(h))
+}
+
+func (h *HexBytes) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	s = strings.TrimPrefix(s, "0x")
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return fmt.Errorf("HexBytes: %w", err)
+	}
+	*h = b
+	return nil
+}
 
 type RpcUrl struct {
 	Url string
@@ -195,7 +219,8 @@ type EventMeta struct {
 
 type DecodedTx struct {
 	TxHash     common.Hash    `json:"tx_hash"`
-	MethodName string         `json:"method_name"` // placeholder for now
+	BlockNum   int64          `json:"block_num"` // populated during backfill
+	MethodName string         `json:"method_name"`
 	From       common.Address `json:"from"`
 	To         common.Address `json:"to"`
 	Params     interface{}    `json:"params"`
@@ -203,7 +228,7 @@ type DecodedTx struct {
 }
 
 type AddFileChunkTxParams struct {
-	ChunkCID         []byte        `json:"chunkCID"`
+	ChunkCID         HexBytes      `json:"chunkCID"`
 	BucketId         common.Hash   `json:"bucketId"`
 	FileName         string        `json:"fileName"`
 	EncodedChunkSize *big.Int      `json:"encodedChunkSize"`
@@ -213,7 +238,7 @@ type AddFileChunkTxParams struct {
 }
 
 type AddFileChunksTxParams struct {
-	Cids               [][]byte        `json:"cids"`
+	Cids               []HexBytes      `json:"cids"`
 	BucketId           common.Hash     `json:"bucketId"`
 	FileName           string          `json:"fileName"`
 	EncodedChunkSizes  []*big.Int      `json:"encodedChunkSizes"`
@@ -227,7 +252,7 @@ type CommitFileTxParams struct {
 	FileName        string      `json:"fileName"`
 	EncodedFileSize *big.Int    `json:"encodedFileSize"`
 	ActualSize      *big.Int    `json:"actualSize"`
-	FileCID         []byte      `json:"fileCID"`
+	FileCID         HexBytes    `json:"fileCID"`
 }
 
 type CreateBucketTxParams struct {
@@ -260,7 +285,7 @@ type FillChunkBlockArgs struct {
 	Nonce      *big.Int    `json:"nonce"`
 	BlockIndex uint8       `json:"blockIndex"`
 	FileName   string      `json:"fileName"`
-	Signature  []byte      `json:"signature"`
+	Signature  HexBytes    `json:"signature"`
 	Deadline   *big.Int    `json:"deadline"`
 }
 
@@ -286,12 +311,23 @@ type SetAuthorityTxParams struct {
 
 type UpgradeToAndCallTxParams struct {
 	NewImplementation common.Address `json:"newImplementation"`
-	Data              []byte         `json:"data"`
+	Data              HexBytes       `json:"data"`
+}
+
+// FailedTx records a transaction that could not be decoded during block
+// processing. It is persisted to the failed_txs table so the tx can be
+// retried later without re-scanning the entire block range.
+type FailedTx struct {
+	TxHash      common.Hash `json:"tx_hash"`
+	BlockNum    int64       `json:"block_num"`
+	BlockHash   common.Hash `json:"block_hash"`
+	ErrorReason string      `json:"error_reason"`
 }
 
 // DecodedBlock represents a chain block plus all successfully decoded
-// contract transactions within it.
+// contract transactions within it, and any transactions that failed to decode.
 type DecodedBlock struct {
-	Block *Block       `json:"block"`
-	Txs   []*DecodedTx `json:"txs"`
+	Block     *Block       `json:"block"`
+	Txs       []*DecodedTx `json:"txs"`
+	FailedTxs []*FailedTx  `json:"failed_txs,omitempty"`
 }

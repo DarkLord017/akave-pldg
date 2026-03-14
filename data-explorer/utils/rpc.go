@@ -16,6 +16,10 @@ import (
 
 var errBlockRangeTooLarge = errors.New("block range too large")
 
+// rpcHTTPClient is a shared HTTP client with a generous timeout so that
+// slow or stalled RPC responses don't hang the indexer forever.
+var rpcHTTPClient = &http.Client{Timeout: 90 * time.Second}
+
 // We are performing manual rpc calls instead of using the package so as to efficiently handle eth_getLogs block range errors
 // basically we will map error range to messages to decode the error and if the error was rate limit exceed we retry with full range but if the error was
 // block range too large we will split the range and retry with smaller ranges until we get a successful response or we hit the minimum range threshold
@@ -40,9 +44,15 @@ func (r *RpcUrl) MakeRequest(ctx context.Context, method string, request_id int,
 		}
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := rpcHTTPClient.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("HTTP request failed: %v", err)
+			if errors.Is(err, context.Canceled) {
+				return nil, err // parent context cancelled — stop immediately
+			}
+			// Network error or timeout — retry with backoff
+			fmt.Printf("RPC request failed (attempt %d/%d): %v\n", i+1, max_retry, err)
+			time.Sleep(time.Duration(1<<i) * time.Second)
+			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -254,35 +264,62 @@ func (r *RpcUrl) GetBlockAndTransactions(
 	maxRetry int,
 	blockNum uint64,
 ) ([]*RPCTransaction, error) {
+	_, txs, err := r.GetBlockWithTransactions(ctx, requestID, maxRetry, blockNum)
+	return txs, err
+}
 
+// GetBlockWithTransactions fetches a block's metadata AND its full transaction
+// list in a single eth_getBlockByNumber call. Use this instead of calling
+// GetBlockByNumber + GetBlockAndTransactions separately.
+func (r *RpcUrl) GetBlockWithTransactions(
+	ctx context.Context,
+	requestID int,
+	maxRetry int,
+	blockNum uint64,
+) (*Block, []*RPCTransaction, error) {
 	params := []interface{}{
 		fmt.Sprintf("0x%x", blockNum),
-		true, // return full transaction objects
+		true, // include full transaction objects
 	}
 
 	resp, err := r.MakeRequest(ctx, "eth_getBlockByNumber", requestID, maxRetry, params)
 	if err != nil {
-		return nil, fmt.Errorf("get block %d: %w", blockNum, err)
+		return nil, nil, fmt.Errorf("get block %d: %w", blockNum, err)
 	}
 
-	var block RPCBlock
-	if err := json.Unmarshal(resp.Result, &block); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal block: %w", err)
+	var raw json.RawMessage
+	if err := json.Unmarshal(resp.Result, &raw); err != nil {
+		return nil, nil, fmt.Errorf("failed to unmarshal result: %w", err)
+	}
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil, fmt.Errorf("block %d not found", blockNum)
 	}
 
-	// Optional: parse block number
+	var rpcBlock RPCBlock
+	if err := json.Unmarshal(raw, &rpcBlock); err != nil {
+		return nil, nil, fmt.Errorf("failed to unmarshal block: %w", err)
+	}
+
 	var num uint64
-	if _, err := fmt.Sscanf(block.Number, "0x%x", &num); err != nil {
-		return nil, fmt.Errorf("invalid block number %s: %w", block.Number, err)
+	if _, err := fmt.Sscanf(rpcBlock.Number, "0x%x", &num); err != nil {
+		return nil, nil, fmt.Errorf("invalid block number %q: %w", rpcBlock.Number, err)
 	}
-
-	// Optional: parse timestamp
 	var ts uint64
-	if _, err := fmt.Sscanf(block.Timestamp, "0x%x", &ts); err != nil {
-		return nil, fmt.Errorf("invalid timestamp %s: %w", block.Timestamp, err)
+	if _, err := fmt.Sscanf(rpcBlock.Timestamp, "0x%x", &ts); err != nil {
+		return nil, nil, fmt.Errorf("invalid timestamp %q: %w", rpcBlock.Timestamp, err)
 	}
 
-	return block.Transactions, nil
+	hash := common.HexToHash(rpcBlock.Hash)
+	parentHash := common.HexToHash(rpcBlock.ParentHash)
+
+	block := &Block{
+		Num:        int64(num),
+		Hash:       hash.Bytes(),
+		ParentHash: parentHash.Bytes(),
+		Timestamp:  time.Unix(int64(ts), 0),
+	}
+
+	return block, rpcBlock.Transactions, nil
 }
 
 func (r *RpcUrl) GetTransactionByHash(ctx context.Context, requestID int, maxRetry int, txHash common.Hash) (*RPCTransaction, error) {

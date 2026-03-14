@@ -7,12 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
-
-var contractAddress common.Address = utils.GetAddress()
 
 func FetchAndDecode(client *ethclient.Client, fromBlock, toBlock int64) ([]*utils.DecodedEvent, error) {
 	rpc := utils.NewRpcUrl(utils.GetRPCURL())

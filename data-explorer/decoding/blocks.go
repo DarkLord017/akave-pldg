@@ -22,27 +22,41 @@ func DecodeBlock(b *types.Block) (*utils.DecodedBlock, error) {
 	}
 
 	var decodedTxs []*utils.DecodedTx
+	var failedTxs []*utils.FailedTx
+
 	for _, tx := range b.Transactions() {
 		from, err := types.Sender(types.LatestSignerForChainID(tx.ChainId()), tx)
 		if err != nil {
+			failedTxs = append(failedTxs, &utils.FailedTx{
+				TxHash:      tx.Hash(),
+				BlockNum:    int64(b.NumberU64()),
+				BlockHash:   b.Hash(),
+				ErrorReason: fmt.Sprintf("recover sender: %v", err),
+			})
 			continue
 		}
 		to := tx.To()
 		dtx, err := DecodeTransaction(tx, from, *to)
 		if err != nil {
-			// For block-level decoding we treat per-tx decode failures as non-fatal
-			// and simply skip those transactions.
+			// Collect decode failures so they can be retried later.
+			failedTxs = append(failedTxs, &utils.FailedTx{
+				TxHash:      tx.Hash(),
+				BlockNum:    int64(b.NumberU64()),
+				BlockHash:   b.Hash(),
+				ErrorReason: fmt.Sprintf("decode tx: %v", err),
+			})
 			continue
 		}
 		if dtx == nil {
-			// tx not targeting our storage contract
+			// tx not targeting our storage contract — not a failure, skip silently.
 			continue
 		}
 		decodedTxs = append(decodedTxs, dtx)
 	}
 
 	return &utils.DecodedBlock{
-		Block: block,
-		Txs:   decodedTxs,
+		Block:     block,
+		Txs:       decodedTxs,
+		FailedTxs: failedTxs,
 	}, nil
 }

@@ -1,7 +1,10 @@
 package config
 
 import (
+	"fmt"
+
 	"data-explorer/utils"
+
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -17,18 +20,22 @@ type BackfillConfig struct {
 }
 
 // DefaultBackfillConfig returns config with sensible defaults.
-func DefaultBackfillConfig() BackfillConfig {
-	addressses, err := utils.FetchStorageContractAddresses()
+// It fetches the list of storage contract addresses dynamically from the explorer API.
+func DefaultBackfillConfig() (BackfillConfig, error) {
+	addresses, err := utils.FetchStorageContractAddresses()
 	if err != nil {
-		panic("Failed to fetch storage contract addresses: " + err.Error())
+		return BackfillConfig{}, fmt.Errorf("fetch storage contract addresses: %w", err)
+	}
+	if len(addresses) == 0 {
+		return BackfillConfig{}, fmt.Errorf("no storage contract addresses returned from explorer API")
 	}
 	return BackfillConfig{
 		RPCURL:            "https://c6-us.akave.ai/ext/bc/56g16Hr1SHQRzdM8JLm3GKYv7APVHY8T2TyeZLvDVzCaTRS7W/rpc",
-		ContractAddresses: addressses,
+		ContractAddresses: addresses,
 		FromBlock:         0,
 		ToBlock:           0,
 		ChunkSize:         2000,
 		MaxRetry:          5,
 		ChainID:           "default",
-	}
+	}, nil
 }

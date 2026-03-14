@@ -107,34 +107,40 @@ func (db *DB) InsertTransaction(ctx context.Context, blockNum int64, blockHash [
 		valueStr = &v
 	}
 
-	query := `
-		SELECT pg_advisory_xact_lock(hashtext($1::text));
+	// Advisory lock (separate call — pq rejects multi-command strings in prepared stmts).
+	if _, err = db.conn.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`,
+		tx.TxHash.Hex()); err != nil {
+		return fmt.Errorf("advisory lock: %w", err)
+	}
+
+	insertQuery := `
 		INSERT INTO actions (
 			block_num, block_hash, tx_hash, tx_index,
 			from_addr, to_addr, contract,
 			method, tx_params, value, events
 		)
-		VALUES ($2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE((SELECT events FROM actions WHERE block_num = $2 AND tx_hash = $4), '[]'::jsonb))
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+		        COALESCE((SELECT events FROM actions WHERE block_num = $1 AND tx_hash = $3), '[]'::jsonb))
 		ON CONFLICT (block_num, tx_hash) DO UPDATE SET
-			method = EXCLUDED.method,
+			method    = EXCLUDED.method,
 			tx_params = EXCLUDED.tx_params,
 			from_addr = EXCLUDED.from_addr,
-			to_addr = EXCLUDED.to_addr,
-			contract = EXCLUDED.contract,
-			value = EXCLUDED.value
+			to_addr   = EXCLUDED.to_addr,
+			contract  = EXCLUDED.contract,
+			value     = EXCLUDED.value
 	`
 
-	_, err = db.conn.ExecContext(ctx, query,
-		tx.TxHash.Hex(),
-		blockNum,
-		blockHash,
-		tx.TxHash.Bytes(),
-		tx.From.Bytes(),
-		tx.To.Bytes(),
-		tx.To.Bytes(),
-		tx.MethodName,
-		txParamsJSON,
-		valueStr,
+	_, err = db.conn.ExecContext(ctx, insertQuery,
+		blockNum,          // $1 block_num
+		blockHash,         // $2 block_hash
+		tx.TxHash.Bytes(), // $3 tx_hash
+		0,                 // $4 tx_index
+		tx.From.Bytes(),   // $5 from_addr
+		tx.To.Bytes(),     // $6 to_addr
+		tx.To.Bytes(),     // $7 contract
+		tx.MethodName,     // $8 method
+		txParamsJSON,      // $9 tx_params
+		valueStr,          // $10 value
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert transaction: %w", err)
@@ -157,15 +163,19 @@ func (db *DB) UpdateEventsForTransaction(ctx context.Context, blockNum int64, tx
 	// Sanitize JSON string
 	jsonStr := utils.SanitizeJSONString(string(eventsJSON))
 
-	query := `
-		SELECT pg_advisory_xact_lock(hashtext($1::text));
+	if _, err = db.conn.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`,
+		string(txHash)); err != nil {
+		return fmt.Errorf("advisory lock: %w", err)
+	}
+
+	insertQuery := `
 		INSERT INTO actions (block_num, block_hash, tx_hash, tx_index, from_addr, to_addr, contract, events)
-		VALUES ($2, $3, $4, 0, $4, $4, $4, $5::jsonb)
+		VALUES ($1, $2, $3, 0, $3, $3, $3, $4::jsonb)
 		ON CONFLICT (block_num, tx_hash) DO UPDATE SET
 			events = COALESCE(actions.events, '[]'::jsonb) || EXCLUDED.events
 	`
 
-	_, err = db.conn.ExecContext(ctx, query, string(txHash), blockNum, []byte{}, txHash, jsonStr)
+	_, err = db.conn.ExecContext(ctx, insertQuery, blockNum, []byte{}, txHash, jsonStr)
 	if err != nil {
 		return fmt.Errorf("failed to update events: %w", err)
 	}
@@ -202,34 +212,40 @@ func (db *DB) InsertTransactionBatch(ctx context.Context, blockNum int64, blockH
 			valueStr = &v
 		}
 
-		query := `
-			SELECT pg_advisory_xact_lock(hashtext($1::text));
+		// Acquire an advisory lock first (separate statement — pq rejects multi-command strings).
+		if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`,
+			decodedTx.TxHash.Hex()); err != nil {
+			return fmt.Errorf("advisory lock tx %s: %w", decodedTx.TxHash.Hex(), err)
+		}
+
+		insertQuery := `
 			INSERT INTO actions (
 				block_num, block_hash, tx_hash, tx_index,
 				from_addr, to_addr, contract,
 				method, tx_params, value, events
 			)
-			VALUES ($2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE((SELECT events FROM actions WHERE block_num = $2 AND tx_hash = $4), '[]'::jsonb))
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+			        COALESCE((SELECT events FROM actions WHERE block_num = $1 AND tx_hash = $3), '[]'::jsonb))
 			ON CONFLICT (block_num, tx_hash) DO UPDATE SET
-				method = EXCLUDED.method,
+				method    = EXCLUDED.method,
 				tx_params = EXCLUDED.tx_params,
 				from_addr = EXCLUDED.from_addr,
-				to_addr = EXCLUDED.to_addr,
-				contract = EXCLUDED.contract,
-				value = EXCLUDED.value
+				to_addr   = EXCLUDED.to_addr,
+				contract  = EXCLUDED.contract,
+				value     = EXCLUDED.value
 		`
 
-		_, err = tx.ExecContext(ctx, query,
-			decodedTx.TxHash.Hex(),
-			blockNum,
-			blockHash,
-			decodedTx.TxHash.Bytes(),
-			decodedTx.From.Bytes(),
-			decodedTx.To.Bytes(),
-			decodedTx.To.Bytes(),
-			decodedTx.MethodName,
-			txParamsJSON,
-			valueStr,
+		_, err = tx.ExecContext(ctx, insertQuery,
+			blockNum,                 // $1 block_num
+			blockHash,                // $2 block_hash
+			decodedTx.TxHash.Bytes(), // $3 tx_hash
+			0,                        // $4 tx_index
+			decodedTx.From.Bytes(),   // $5 from_addr
+			decodedTx.To.Bytes(),     // $6 to_addr
+			decodedTx.To.Bytes(),     // $7 contract
+			decodedTx.MethodName,     // $8 method
+			txParamsJSON,             // $9 tx_params
+			valueStr,                 // $10 value
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert transaction: %w", err)

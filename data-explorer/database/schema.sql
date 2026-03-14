@@ -79,9 +79,26 @@ CREATE INDEX actions_to_idx ON actions (to_addr) WHERE to_addr IS NOT NULL;
 CREATE INDEX actions_tx_params_gin ON actions USING GIN (tx_params jsonb_path_ops) WHERE tx_params IS NOT NULL;
 CREATE INDEX actions_events_gin ON actions USING GIN (events jsonb_path_ops) WHERE events IS NOT NULL;
 
+-- Transactions that could not be decoded during block processing.
+-- Kept separate so the main actions table is never polluted with partial rows.
+-- status lifecycle: pending → resolved (decoded on retry) | abandoned (max retries exceeded)
+CREATE TABLE failed_txs (
+    tx_hash         bytea PRIMARY KEY,
+    block_num       bigint NOT NULL,
+    block_hash      bytea NOT NULL,
+    error_reason    text NOT NULL,
+    retry_count     integer NOT NULL DEFAULT 0,
+    status          text NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'resolved', 'abandoned')),
+    inserted_at     timestamptz NOT NULL DEFAULT now(),
+    last_attempted  timestamptz
+);
+
+CREATE INDEX failed_txs_status_idx    ON failed_txs (status);
+CREATE INDEX failed_txs_block_num_idx ON failed_txs (block_num);
+
 -- Composite indexes for common query patterns
 CREATE INDEX actions_contract_block_idx ON actions (contract, block_num DESC);
 CREATE INDEX actions_from_block_idx ON actions (from_addr, block_num DESC);
 
--- Unique constraint: one row per transaction
 CREATE UNIQUE INDEX actions_tx_unique ON actions (block_num, tx_hash);

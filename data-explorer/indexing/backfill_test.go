@@ -58,7 +58,7 @@ func TestLoggingHandler(t *testing.T) {
 
 func TestBackfill_InvalidRange(t *testing.T) {
 	ctx := context.Background()
-	cfg := config.DefaultBackfillConfig()
+	cfg, _ := config.DefaultBackfillConfig()
 	cfg.FromBlock = 1000
 	cfg.ToBlock = 500 // from > to
 
@@ -75,7 +75,7 @@ func TestBackfill_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	cfg := config.DefaultBackfillConfig()
+	cfg, _ := config.DefaultBackfillConfig()
 	cfg.FromBlock = 0
 	cfg.ToBlock = 0 // will try GetBlockNumber first
 
@@ -93,7 +93,7 @@ func TestBackfill_EmptyRange(t *testing.T) {
 	// Use a block range that requires GetLogs; RPC will fail without network,
 	// but we verify Backfill is invoked and returns an error (not panic).
 	ctx := context.Background()
-	cfg := config.DefaultBackfillConfig()
+	cfg, _ := config.DefaultBackfillConfig()
 	cfg.RPCURL = "http://127.0.0.1:99999" // unreachable
 	cfg.FromBlock = 1
 	cfg.ToBlock = 1
@@ -106,7 +106,7 @@ func TestBackfill_EmptyRange(t *testing.T) {
 
 func TestBackfill_BatchHandler(t *testing.T) {
 	ctx := context.Background()
-	cfg := config.DefaultBackfillConfig()
+	cfg, _ := config.DefaultBackfillConfig()
 	cfg.FromBlock = 0
 	cfg.ToBlock = 0
 
@@ -144,8 +144,8 @@ func TestBackfill_BatchHandler(t *testing.T) {
 		t.Errorf("expected last indexed block %d, got %d", totalBlocks, stats)
 	}
 
-	//check events data in db 
-	events , err := db.GetEventsByBlockRange(ctx, 0, int64(totalBlocks))
+	//check events data in db
+	events, err := db.GetEventsByBlockRange(ctx, 0, int64(totalBlocks))
 	if err != nil {
 		t.Fatalf("failed to get events by block range: %v", err)
 	}
