@@ -60,6 +60,7 @@ func TestDecodeTransaction(t *testing.T) {
 			check: func(t *testing.T, decoded *utils.DecodedTx) {
 				if decoded == nil {
 					t.Fatal("expected decoded tx, got nil")
+					return
 				}
 				if decoded.MethodName != "createBucket" {
 					t.Errorf("expected createBucket, got %s", decoded.MethodName)
@@ -145,11 +146,12 @@ func TestDecodeTransaction(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			to := tx.To()
-			if to == nil {
+			toAddress := tx.To()
+			if toAddress == nil {
 				t.Fatal("to address is nil")
+				return
 			}
-			decoded, err := DecodeTransaction(tx, from, *to)
+			decoded, err := DecodeTransaction(tx, from, *toAddress)
 			if tt.expectErr {
 				if err == nil {
 					t.Errorf("expected error, got nil")

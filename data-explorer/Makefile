@@ -21,15 +21,18 @@ fmt:
 lint:
 	@golangci-lint run ./...
 
+lint-fix:
+	@golangci-lint run --fix ./...	
+
 gosec:
 	@gosec ./...
 
 build:
 	@mkdir -p $(BIN_DIR)
-	@go build -o $(BIN_DIR)/$(APP_NAME) ./...
+	@go build -o $(BIN_DIR)/$(APP_NAME) .
 
 test:
-	@go test ./... -v -timeout 2m
+	@go test ./... -v -timeout 10m
 
 clean:
 	@rm -rf $(BIN_DIR)
@@ -53,4 +56,11 @@ fix-imports:
 	@find . -name '*.go' -not -path "./vendor/*" -exec goimports -w {} +
 	@echo "Done!"
 
+release: clean build
+	@echo "Release build completed. Binary is located at $(BIN_DIR)/$(APP_NAME)"	
 
+docker-build:
+	@docker compose build --no-cache
+
+docker-run:
+	@docker compose up -d

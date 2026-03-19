@@ -61,7 +61,9 @@ func (db *DB) ListPendingFailedTxs(ctx context.Context, maxRetries, limit int) (
 	if err != nil {
 		return nil, fmt.Errorf("ListPendingFailedTxs: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var out []FailedTxRecord
 	for rows.Next() {

@@ -9,7 +9,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o bin/data-explorer ./...
+RUN go build -o bin/data-explorer .
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM alpine:3.21
@@ -19,16 +19,6 @@ RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /app
 
 COPY --from=builder /app/bin/data-explorer .
-
-# Environment variables — defaults match docker-compose.yaml
-ENV DB_HOST=postgres \
-    DB_USER=indexer \
-    DB_PASSWORD=indexer_password \
-    DB_NAME=blockchain_explorer \
-    RPC_URL=https://c6-us.akave.ai/ext/bc/56g16Hr1SHQRzdM8JLm3GKYv7APVHY8T2TyeZLvDVzCaTRS7W/rpc \
-    BACKFILL_FROM=0 \
-    BACKFILL_TO=0 \
-    API_ADDR=:8080
 
 EXPOSE 8080
 

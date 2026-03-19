@@ -5,6 +5,6 @@ bin/
 
 **/*.abi
 **/*.bin
-# Ignore common build folders at any level
+
 **/build/
 **/artifacts/

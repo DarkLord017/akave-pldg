@@ -52,11 +52,12 @@ func TestDecodeTestTransactions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to get sender: %v", err)
 		}
-		to := testTx.To()
-		if to == nil {
+		toAddress := testTx.To()
+		if toAddress == nil {
 			t.Fatalf("Failed to get to address: %v", err)
+			return
 		}
-		decoded, err := decoding.DecodeTransaction(testTx, from, *to)
+		decoded, err := decoding.DecodeTransaction(testTx, from, *toAddress)
 		if err != nil {
 			t.Fatalf("Failed to decode transaction: %v", err)
 		}

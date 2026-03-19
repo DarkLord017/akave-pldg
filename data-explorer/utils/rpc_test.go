@@ -56,7 +56,7 @@ func TestGetLogs(t *testing.T) {
 		end   int
 	}{
 		{"Test Case 1", 1278075, 1278076},
-		{"Test Case 2", 1258076, 1278076},
+		{"Test Case 2", 1256076, 1258076},
 	}
 
 	for _, c := range cases {

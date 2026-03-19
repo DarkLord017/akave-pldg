@@ -94,7 +94,7 @@ func TestBackfill_EmptyRange(t *testing.T) {
 	// but we verify Backfill is invoked and returns an error (not panic).
 	ctx := context.Background()
 	cfg, _ := config.DefaultBackfillConfig()
-	cfg.RPCURL = "http://127.0.0.1:99999" // unreachable
+	cfg.RPCURL = "http://127.0.0.1:" // unreachable
 	cfg.FromBlock = 1
 	cfg.ToBlock = 1
 

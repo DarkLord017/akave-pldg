@@ -76,18 +76,23 @@ func (db *DB) ListActions(ctx context.Context, f ActionFilter, after *CursorVal,
 		conds = append(conds, fmt.Sprintf("a.contract = $%d", len(args)))
 	}
 	if f.TxParamKey != "" && f.TxParamVal != "" {
-		// Fast path: scalar equality or single-level array contains the value (GIN-friendly).
+
 		args = append(args, f.TxParamKey, f.TxParamVal, f.TxParamKey, f.TxParamVal)
 		ginCond := fmt.Sprintf(
 			"(a.tx_params @> jsonb_build_object($%d::text, to_jsonb($%d::text)) OR a.tx_params @> jsonb_build_object($%d::text, jsonb_build_array(to_jsonb($%d::text))))",
 			len(args)-3, len(args)-2, len(args)-1, len(args))
 
-		// Fallback: recursive search under the key to catch nested arrays (e.g., chunkBlocksCIDs list-of-lists).
 		escapedKey := strings.ReplaceAll(f.TxParamKey, "\"", "\"\"")
-		path := fmt.Sprintf(`$."%s"** ? (@ == $val)`, escapedKey)
-		args = append(args, path, f.TxParamVal)
+		path := fmt.Sprintf(`$."%s".** ? (@ == $val)`, escapedKey)
+		var jsonb interface{}
+		if err := json.Unmarshal([]byte(f.TxParamVal), &jsonb); err != nil {
+			jsonb = f.TxParamVal
+		}
+		valJSON, _ := json.Marshal(jsonb)
+		args = append(args, path, valJSON)
+
 		jsonPathCond := fmt.Sprintf(
-			"jsonb_path_exists(a.tx_params, $%d::jsonpath, jsonb_build_object('val', to_jsonb($%d::text)))",
+			"jsonb_path_exists(a.tx_params, $%d::jsonpath, jsonb_build_object('val', $%d::jsonb))",
 			len(args)-1, len(args))
 
 		// Combine both so either match succeeds.
@@ -140,7 +145,9 @@ func (db *DB) ListActions(ctx context.Context, f ActionFilter, after *CursorVal,
 	if err != nil {
 		return ListActionsResult{}, fmt.Errorf("ListActions: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var result []ActionRow
 	for rows.Next() {
@@ -223,7 +230,9 @@ func (db *DB) GetDistinctMethods(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetDistinctMethods: %w", err)
 	}
-	defer rows.Close()
+	defer func () {
+	_ = rows.Close()
+	}()
 
 	var out []string
 	for rows.Next() {
@@ -249,7 +258,9 @@ func (db *DB) GetContracts(ctx context.Context) ([]ContractRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetContracts: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		_ = rows.Close()
+	}()
 
 	var out []ContractRow
 	for rows.Next() {
