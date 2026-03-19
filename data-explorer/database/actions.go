@@ -230,8 +230,8 @@ func (db *DB) GetDistinctMethods(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("GetDistinctMethods: %w", err)
 	}
-	defer func () {
-	_ = rows.Close()
+	defer func() {
+		_ = rows.Close()
 	}()
 
 	var out []string
