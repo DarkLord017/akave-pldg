@@ -113,7 +113,7 @@ func DecodeRPCTransaction(rpcTx *utils.RPCTransaction) (*utils.DecodedTx, error)
 		// Fallback: manual hex decode
 		for i := 0; i < len(inputHex)-1; i += 2 {
 			var b byte
-			_ , err := fmt.Sscanf(inputHex[i:i+2], "%02x", &b)
+			_, err := fmt.Sscanf(inputHex[i:i+2], "%02x", &b)
 			if err != nil {
 				return nil, fmt.Errorf("failed to scan hex data at position %d: %w", i, err)
 			}

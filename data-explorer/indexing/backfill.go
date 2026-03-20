@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"data-explorer/config"
@@ -117,35 +118,92 @@ func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandl
 				}
 
 				blocks = make([]*utils.Block, 0, len(blockNums))
-				for num := range blockNums {
-					// Single RPC call: fetch block metadata AND full tx list.
-					b, rpcTxs, err := rpc.GetBlockWithTransactions(ctx, 1, cfg.MaxRetry, num)
-					if err != nil {
-						return fmt.Errorf("get block %d: %w", num, err)
-					}
-					blocks = append(blocks, b)
+				// Fetch blocks + decode txs concurrently (bounded worker pool).
+				workers := int(cfg.MaxRPCCalls)
+				if workers <= 0 {
+					workers = 8
+				}
 
-					// Decode every transaction in this block.
-					blockHash := common.BytesToHash(b.Hash)
-					for _, rpcTx := range rpcTxs {
-						dtx, err := decoding.DecodeRPCTransaction(rpcTx)
+				chunkCtx, cancel := context.WithCancel(ctx)
+				defer cancel()
+
+				var (
+					wg       sync.WaitGroup
+					mu       sync.Mutex
+					firstErr error
+				)
+
+				numCh := make(chan uint64)
+				workerFn := func() {
+					defer wg.Done()
+					for num := range numCh {
+						if chunkCtx.Err() != nil {
+							return
+						}
+
+						// Single RPC call: fetch block metadata AND full tx list.
+						b, rpcTxs, err := rpc.GetBlockWithTransactions(chunkCtx, 1, cfg.MaxRetry, num)
 						if err != nil {
-							if isPermanentDecodeError(err) {
-								// tx does not target our contract — skip silently.
+							mu.Lock()
+							if firstErr == nil {
+								firstErr = fmt.Errorf("get block %d: %w", num, err)
+								cancel()
+							}
+							mu.Unlock()
+							return
+						}
+
+						blockHash := common.BytesToHash(b.Hash)
+
+						// Decode every transaction in this block.
+						localDecoded := make([]*utils.DecodedTx, 0, len(rpcTxs))
+						localFailed := make([]*utils.FailedTx, 0)
+						for _, rpcTx := range rpcTxs {
+							dtx, err := decoding.DecodeRPCTransaction(rpcTx)
+							if err != nil {
+								if isPermanentDecodeError(err) {
+									// tx does not target our contract — skip silently.
+									continue
+								}
+								// Real decode failure — record for retry.
+								localFailed = append(localFailed, &utils.FailedTx{
+									TxHash:      common.HexToHash(rpcTx.Hash),
+									BlockNum:    b.Num,
+									BlockHash:   blockHash,
+									ErrorReason: fmt.Sprintf("decode tx: %v", err),
+								})
 								continue
 							}
-							// Real decode failure — record for retry.
-							failedTxs = append(failedTxs, &utils.FailedTx{
-								TxHash:      common.HexToHash(rpcTx.Hash),
-								BlockNum:    b.Num,
-								BlockHash:   blockHash,
-								ErrorReason: fmt.Sprintf("decode tx: %v", err),
-							})
-							continue
+							dtx.BlockNum = b.Num
+							localDecoded = append(localDecoded, dtx)
 						}
-						dtx.BlockNum = b.Num
-						decodedTxs = append(decodedTxs, dtx)
+
+						mu.Lock()
+						blocks = append(blocks, b)
+						decodedTxs = append(decodedTxs, localDecoded...)
+						failedTxs = append(failedTxs, localFailed...)
+						mu.Unlock()
 					}
+				}
+
+				wg.Add(workers)
+				for i := 0; i < workers; i++ {
+					go workerFn()
+				}
+
+			outer:
+				for num := range blockNums {
+					select {
+					case numCh <- num:
+					case <-chunkCtx.Done():
+						break outer
+					}
+				}
+				close(numCh)
+
+				wg.Wait()
+				if firstErr != nil {
+					return firstErr
 				}
 			}
 

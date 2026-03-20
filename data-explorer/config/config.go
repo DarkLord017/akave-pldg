@@ -17,6 +17,7 @@ type BackfillConfig struct {
 	ChunkSize         uint64 // blocks per eth_getLogs call
 	MaxRetry          int
 	ChainID           string // for indexing_state
+	MaxRPCCalls       int    // maximum number of concurrent RPC calls
 }
 
 // DefaultBackfillConfig returns config with sensible defaults.
@@ -37,5 +38,6 @@ func DefaultBackfillConfig() (BackfillConfig, error) {
 		ChunkSize:         2000,
 		MaxRetry:          5,
 		ChainID:           "default",
+		MaxRPCCalls:       8,
 	}, nil
 }
