@@ -120,7 +120,7 @@ func TestBackfill_BatchHandler(t *testing.T) {
 		}
 	}()
 
-	batchHandler := DBHandler(db, "default")
+	batchHandler := DBHandler(db, "default", cfg)
 
 	totalBlocks := 100
 	cfg.FromBlock = 0

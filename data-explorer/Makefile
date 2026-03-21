@@ -7,6 +7,7 @@ help:
 	@echo "Available targets:"
 	@echo "  fmt           - Format Go code with gofmt"
 	@echo "  lint          - Run golangci-lint"
+	@echo "  lint-fix      - Run golangci-lint with --fix to automatically fix issues"
 	@echo "  gosec         - Run gosec security checks"
 	@echo "  build         - Build the data-explorer binary"
 	@echo "  test          - Run go test ./..."
@@ -14,6 +15,9 @@ help:
 	@echo "  deps          - Fetch Go module dependencies"
 	@echo "  fix-imports   - Remove unused imports with goimports"
 	@echo "  install-tools - Install linting/security tools (golangci-lint, gosec, goimports)"
+	@echo "  release        - Clean and build for release"
+	@echo "  docker-build   - Build the Docker image"
+	@echo "  docker-run     - Run the Docker container"
 
 fmt:
 	@gofmt -w ./ 

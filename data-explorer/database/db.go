@@ -460,3 +460,38 @@ func (db *DB) GetEventsByBlockRange(ctx context.Context, fromBlock int64, toBloc
 
 	return allEvents, nil
 }
+
+func (db *DB) DeleteFromBlock(ctx context.Context, fromBlock int64) error {
+	tx, err := db.conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `
+		DELETE FROM actions WHERE block_num >= $1;
+		DELETE FROM blocks WHERE num >= $1;
+		DELETE FROM failed_txs WHERE block_num >= $1;
+		DELETE FROM indexing_state WHERE last_indexed >= $1;
+	`, fromBlock)
+
+	if err != nil {
+		return fmt.Errorf("batch delete failed: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *DB) GetBlock(ctx context.Context, blockNum int64) *utils.Block {
+	query := `SELECT num, hash, parent_hash, timestamp FROM blocks WHERE num = $1`
+	var block utils.Block
+	err := db.conn.QueryRowContext(ctx, query, blockNum).Scan(&block.Num, &block.Hash, &block.ParentHash, &block.Timestamp)
+	if err != nil {
+		log.Printf("GetBlock: failed to get block %d: %v", blockNum, err)
+		return nil
+	}
+	return &block
+}
