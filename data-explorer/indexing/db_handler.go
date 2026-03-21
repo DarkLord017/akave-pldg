@@ -17,12 +17,24 @@ func DBHandler(db *database.DB, chainID string, backfillCfg config.BackfillConfi
 	maxRetry := backfillCfg.MaxRetry
 
 	return func(ctx context.Context, events []*utils.DecodedEvent, decodedTxs []*utils.DecodedTx, failedTxs []*utils.FailedTx, chunkEndBlock int64, blocks []*utils.Block) error {
+		recentBlocks := make(map[int64]*utils.Block, len(blocks))
+		for _, b := range blocks {
+			recentBlocks[b.Num] = b
+		}
+
 		for _, block := range blocks {
+			if _, keep := recentBlocks[block.Num]; !keep {
+				continue
+			}
+
 			if block.Num > 0 {
-				parentBlock := db.GetBlock(ctx, block.Num-1)
+				parentBlock := recentBlocks[block.Num-1]
+				if parentBlock == nil {
+					parentBlock = db.GetBlock(ctx, block.Num-1)
+				}
 				if parentBlock != nil {
 					if block.ParentHash != nil && !bytes.Equal(block.ParentHash, parentBlock.Hash) {
-						if err := handleReorg(ctx, db, backfillCfg, block.Num , block.Num-1); err != nil {
+						if err := handleReorg(ctx, db, backfillCfg, recentBlocks, block.Num, block.Num-1); err != nil {
 							return fmt.Errorf("handle reorg at block %d: %w", block.Num, err)
 						}
 					}
@@ -32,17 +44,23 @@ func DBHandler(db *database.DB, chainID string, backfillCfg config.BackfillConfi
 						return fmt.Errorf("fetch parent block %d: %w", block.Num-1, err)
 					}
 
-					var parentParentBlock *utils.Block
 					blockNum := block.Num - 1
-					for parentParentBlock == nil {
+					for blockNum > 0 {
 						blockNum = blockNum - 1
-						parentParentBlock = db.GetBlock(ctx, blockNum)
-						if parentParentBlock != nil && !bytes.Equal(parentBlockData.ParentHash, parentParentBlock.Hash) {
-							if err := handleReorg(ctx, db, backfillCfg, blockNum+1, block.Num-1); err != nil {
+						parentParentBlock := recentBlocks[blockNum]
+						if parentParentBlock == nil {
+							parentParentBlock = db.GetBlock(ctx, blockNum)
+						}
+						if parentParentBlock == nil {
+							continue
+						}
+						if !bytes.Equal(parentBlockData.ParentHash, parentParentBlock.Hash) {
+							if err := handleReorg(ctx, db, backfillCfg, recentBlocks, blockNum+1, block.Num-1); err != nil {
 								return fmt.Errorf("handle reorg at block %d: %w", blockNum+1, err)
 							}
 							break
 						}
+						break
 					}
 				}
 			}
@@ -109,11 +127,18 @@ func DBHandler(db *database.DB, chainID string, backfillCfg config.BackfillConfi
 	}
 }
 
-func handleReorg(ctx context.Context, db *database.DB, baseCfg config.BackfillConfig, fromBlock int64, toBlock int64) error {
+func handleReorg(ctx context.Context, db *database.DB, baseCfg config.BackfillConfig, recentBlocks map[int64]*utils.Block, fromBlock int64, toBlock int64) error {
+	if fromBlock <= 0 {
+		return nil
+	}
+
 	rpc := utils.NewRpcUrl(baseCfg.RPCURL)
-	for {
-		dbBlock := db.GetBlock(ctx, fromBlock-1)
-		if dbBlock == nil {
+	for fromBlock > 0 {
+		knownBlock := recentBlocks[fromBlock-1]
+		if knownBlock == nil {
+			knownBlock = db.GetBlock(ctx, fromBlock-1)
+		}
+		if knownBlock == nil {
 			fromBlock = fromBlock - 1
 			continue
 		}
@@ -121,14 +146,25 @@ func handleReorg(ctx context.Context, db *database.DB, baseCfg config.BackfillCo
 		if err != nil {
 			return fmt.Errorf("fetch block %d: %w", fromBlock-1, err)
 		}
-		if bytes.Equal(block.Hash, dbBlock.Hash) {
+		if bytes.Equal(block.Hash, knownBlock.Hash) {
 			break
 		}
 		fromBlock = fromBlock - 1
 	}
 
+	if fromBlock < 0 {
+		fromBlock = 0
+	}
+	if toBlock < fromBlock {
+		return nil
+	}
+
 	if err := db.DeleteFromBlock(ctx, fromBlock); err != nil {
-		return fmt.Errorf("delete blocks from %d: %w", fromBlock, err)
+		for num := range recentBlocks {
+			if num >= fromBlock {
+				delete(recentBlocks, num)
+			}
+		}
 	}
 
 	reorgCfg := baseCfg

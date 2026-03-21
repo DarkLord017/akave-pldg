@@ -466,7 +466,9 @@ func (db *DB) DeleteFromBlock(ctx context.Context, fromBlock int64) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+	_ = tx.Rollback()
+	}()
 
 	_, err = tx.ExecContext(ctx, `
 		DELETE FROM actions WHERE block_num >= $1;
@@ -495,3 +497,77 @@ func (db *DB) GetBlock(ctx context.Context, blockNum int64) *utils.Block {
 	}
 	return &block
 }
+
+func (db *DB) GetMissingBlocks(ctx context.Context, chainID string, fromBlock int64, toBlock int64) ([]int64, error) {
+	query := `
+		SELECT num FROM blocks
+		WHERE num >= $1 AND num <= $2
+	`
+	rows, err := db.conn.QueryContext(ctx, query, fromBlock, toBlock)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query blocks: %w", err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			log.Printf("Error closing rows: %v", closeErr)
+		}
+	}()
+
+	existingBlocks := make(map[int64]bool)
+	for rows.Next() {
+		var num int64
+		if err := rows.Scan(&num); err != nil {
+			return nil, fmt.Errorf("failed to scan block num: %w", err)
+		}
+		existingBlocks[num] = true
+	}
+
+	var missingBlocks []int64
+	for i := fromBlock; i <= toBlock; i++ {
+		if !existingBlocks[i] {
+			missingBlocks = append(missingBlocks, i)
+		}
+	}
+
+	return missingBlocks, nil
+}
+
+// GetFailedTxsByBlockRange returns all failed_txs rows (any status) whose
+// block_num falls within [fromBlock, toBlock]. Used by tests to get an
+// accurate per-chunk failed transaction count without bleeding across ranges.
+func (db *DB) GetFailedTxsByBlockRange(ctx context.Context, fromBlock, toBlock int64) ([]FailedTxRecord, error) {
+	query := `
+		SELECT tx_hash, block_num, block_hash, error_reason, retry_count, status, inserted_at, last_attempted
+		FROM failed_txs
+		WHERE block_num >= $1 AND block_num <= $2
+		ORDER BY block_num ASC
+	`
+	rows, err := db.conn.QueryContext(ctx, query, fromBlock, toBlock)
+	if err != nil {
+		return nil, fmt.Errorf("GetFailedTxsByBlockRange %d-%d: %w", fromBlock, toBlock, err)
+	}
+	defer func() { _ = rows.Close() }()
+ 
+	var out []FailedTxRecord
+	for rows.Next() {
+		var r FailedTxRecord
+		if err := rows.Scan(
+			&r.TxHash, &r.BlockNum, &r.BlockHash,
+			&r.ErrorReason, &r.RetryCount, &r.Status,
+			&r.InsertedAt, &r.LastAttempted,
+		); err != nil {
+			return nil, fmt.Errorf("GetFailedTxsByBlockRange scan: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (db *DB) CountActionsByBlock(ctx context.Context, blockNum uint64) (int, error) {
+    var n int
+    err := db.conn.QueryRowContext(ctx,
+        `SELECT COUNT(DISTINCT tx_hash) FROM actions WHERE block_num = $1`, blockNum,
+    ).Scan(&n)
+    return n, err
+}
+ 
