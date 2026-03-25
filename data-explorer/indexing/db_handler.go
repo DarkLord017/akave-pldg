@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-
+	"log/slog"
 	"data-explorer/config"
 	"data-explorer/database"
 	"data-explorer/utils"
@@ -15,8 +15,9 @@ import (
 func DBHandler(db *database.DB, chainID string, backfillCfg config.BackfillConfig) BatchEventHandler {
 	rpcURL := backfillCfg.RPCURL
 	maxRetry := backfillCfg.MaxRetry
-
-	return func(ctx context.Context, events []*utils.DecodedEvent, decodedTxs []*utils.DecodedTx, failedTxs []*utils.FailedTx, chunkEndBlock int64, blocks []*utils.Block) error {
+    
+	var self BatchEventHandler
+	self = func(ctx context.Context, events []*utils.DecodedEvent, decodedTxs []*utils.DecodedTx, failedTxs []*utils.FailedTx, chunkEndBlock int64, blocks []*utils.Block) error {
 		recentBlocks := make(map[int64]*utils.Block, len(blocks))
 		for _, b := range blocks {
 			recentBlocks[b.Num] = b
@@ -34,7 +35,7 @@ func DBHandler(db *database.DB, chainID string, backfillCfg config.BackfillConfi
 				}
 				if parentBlock != nil {
 					if block.ParentHash != nil && !bytes.Equal(block.ParentHash, parentBlock.Hash) {
-						if err := handleReorg(ctx, db, backfillCfg, recentBlocks, block.Num, block.Num-1); err != nil {
+						if err := handleReorg(ctx, db, backfillCfg, recentBlocks, block.Num, block.Num-1 , self); err != nil {
 							return fmt.Errorf("handle reorg at block %d: %w", block.Num, err)
 						}
 					}
@@ -55,7 +56,7 @@ func DBHandler(db *database.DB, chainID string, backfillCfg config.BackfillConfi
 							continue
 						}
 						if !bytes.Equal(parentBlockData.ParentHash, parentParentBlock.Hash) {
-							if err := handleReorg(ctx, db, backfillCfg, recentBlocks, blockNum+1, block.Num-1); err != nil {
+							if err := handleReorg(ctx, db, backfillCfg, recentBlocks, blockNum+1, block.Num-1, self); err != nil {
 								return fmt.Errorf("handle reorg at block %d: %w", blockNum+1, err)
 							}
 							break
@@ -125,9 +126,10 @@ func DBHandler(db *database.DB, chainID string, backfillCfg config.BackfillConfi
 
 		return nil
 	}
+	return self
 }
 
-func handleReorg(ctx context.Context, db *database.DB, baseCfg config.BackfillConfig, recentBlocks map[int64]*utils.Block, fromBlock int64, toBlock int64) error {
+func handleReorg(ctx context.Context, db *database.DB, baseCfg config.BackfillConfig, recentBlocks map[int64]*utils.Block, fromBlock int64, toBlock int64, self BatchEventHandler) error {
 	if fromBlock <= 0 {
 		return nil
 	}
@@ -160,17 +162,20 @@ func handleReorg(ctx context.Context, db *database.DB, baseCfg config.BackfillCo
 	}
 
 	if err := db.DeleteFromBlock(ctx, fromBlock); err != nil {
-		for num := range recentBlocks {
-			if num >= fromBlock {
-				delete(recentBlocks, num)
-			}
+    slog.Warn("reorg: DeleteFromBlock failed, blocks may not be persisted yet",
+        "fromBlock", fromBlock, "err", err)
+	}
+
+	for num := range recentBlocks {
+		if num >= fromBlock {
+			delete(recentBlocks, num)
 		}
 	}
 
 	reorgCfg := baseCfg
 	reorgCfg.FromBlock = uint64(fromBlock)
 	reorgCfg.ToBlock = uint64(toBlock)
-	if err := Backfill(ctx, reorgCfg, NoOpHandler, nil); err != nil {
+	if err := Backfill(ctx, reorgCfg, nil, self); err != nil {
 		return fmt.Errorf("backfill after reorg from %d to %d: %w", fromBlock, toBlock, err)
 	}
 
