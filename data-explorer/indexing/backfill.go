@@ -23,7 +23,7 @@ type EventHandler func(ctx context.Context, ev *utils.DecodedEvent) error
 //   - decodedTxs:  all successfully decoded contract transactions in those blocks
 //   - failedTxs:   transactions that could not be decoded (saved for later retry)
 //   - chunkEndBlock: last block number in the chunk (use for indexing_state)
-//   - blocks:      metadata for every block that contained at least one event
+//   - blocks:      metadata for every block in the chunk
 type BatchEventHandler func(
 	ctx context.Context,
 	events []*utils.DecodedEvent,
@@ -110,22 +110,25 @@ func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandl
 			var decodedTxs []*utils.DecodedTx
 			var failedTxs []*utils.FailedTx
 
-			if len(batch) > 0 {
-				// Collect the unique block numbers that had matching events.
+			// Wrapped in a closure so defer cancel() fires at end of each
+			// chunk iteration, not at the end of the entire Backfill call.
+			err := func() error {
+				// Always collect ALL block numbers in the chunk range,
+				// not just blocks that contained matching events.
 				blockNums := make(map[uint64]struct{})
-				for _, ev := range batch {
-					blockNums[ev.BlockNumber] = struct{}{}
+				for num := uint64(start); num <= uint64(end); num++ {
+					blockNums[num] = struct{}{}
 				}
 
 				blocks = make([]*utils.Block, 0, len(blockNums))
-				// Fetch blocks + decode txs concurrently (bounded worker pool).
+
 				workers := int(cfg.MaxRPCCalls)
 				if workers <= 0 {
 					workers = 8
 				}
 
 				chunkCtx, cancel := context.WithCancel(ctx)
-				defer cancel()
+				defer cancel() // ✅ fires at end of each chunk, not end of Backfill
 
 				var (
 					wg       sync.WaitGroup
@@ -202,9 +205,11 @@ func Backfill(ctx context.Context, cfg config.BackfillConfig, handler EventHandl
 				close(numCh)
 
 				wg.Wait()
-				if firstErr != nil {
-					return firstErr
-				}
+				return firstErr
+			}()
+
+			if err != nil {
+				return err
 			}
 
 			if err := batchHandler(ctx, batch, decodedTxs, failedTxs, int64(end), blocks); err != nil {

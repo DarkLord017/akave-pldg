@@ -18,7 +18,7 @@ var errBlockRangeTooLarge = errors.New("block range too large")
 
 // rpcHTTPClient is a shared HTTP client with a generous timeout so that
 // slow or stalled RPC responses don't hang the indexer forever.
-var rpcHTTPClient = &http.Client{Timeout: 90 * time.Second}
+var rpcHTTPClient = &http.Client{Timeout: 500 * time.Second}
 
 // We are performing manual rpc calls instead of using the package so as to efficiently handle eth_getLogs block range errors
 // basically we will map error range to messages to decode the error and if the error was rate limit exceed we retry with full range but if the error was

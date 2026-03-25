@@ -67,7 +67,7 @@ func main() {
 		}
 	}
 
-	handler := indexing.DBHandler(db, bfCfg.ChainID)
+	handler := indexing.DBHandler(db, bfCfg.ChainID, bfCfg)
 
 	// ── Indexer: backfill then live ───────────────────────────────────────────
 	go func() {
