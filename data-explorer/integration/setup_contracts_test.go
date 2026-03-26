@@ -66,7 +66,7 @@ func TestContractFunctionality(t *testing.T) {
 	for _, lg := range receipt.Logs {
 		event, err := decoding.DecodeAnyLog(*lg)
 		if err == nil && event.EventName == "CreateBucket" {
-			nameHash := common.BytesToHash([]byte(event.Data["name"].(string)))
+			nameHash := common.HexToHash((event.Data["name"].(string)))
 			if nameHash != expectedNameHash {
 				t.Fatalf("bucket name hash mismatch: expected %s, got %s", expectedNameHash.Hex(), nameHash.Hex())
 			}
