@@ -18,6 +18,7 @@ help:
 	@echo "  release        - Clean and build for release"
 	@echo "  docker-build   - Build the Docker image"
 	@echo "  docker-run     - Run the Docker container"
+	@echo "  start           - Build and run the Docker container"
 
 fmt:
 	@gofmt -w ./ 
@@ -68,3 +69,6 @@ docker-build:
 
 docker-run:
 	@docker compose up -d
+
+start: docker-build docker-run
+	@echo "Data Explorer is starting up. It may take a few moments for the API to be ready."
