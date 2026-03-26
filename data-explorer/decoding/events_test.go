@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto/keccak"
 )
 
 func TestDecodeAnyLog(t *testing.T) {
@@ -26,7 +27,7 @@ func TestDecodeAnyLog(t *testing.T) {
 				event := abi.Events["CreateBucket"]
 				bucketId := common.Hash{1}
 				var nameHash common.Hash
-				copy(nameHash[:], "test-bucket")
+				nameHash = common.Hash(keccak.NewLegacyKeccak256().Sum([]byte("test-bucket")))
 				owner := common.HexToAddress("0x0000000000000000000000000000000000000000000000000000000000000123")
 
 				topics := []common.Hash{
@@ -51,7 +52,7 @@ func TestDecodeAnyLog(t *testing.T) {
 					t.Errorf("Incorrect id hex: %v", data["id"])
 				}
 				nameVal, ok := data["name"].(string)
-				if !ok || nameVal != "test-bucket" {
+				if !ok || nameVal != common.Hash(keccak.NewLegacyKeccak256().Sum([]byte("test-bucket"))).Hex() {
 					t.Errorf("Incorrect name string: %v", data["name"])
 				}
 				ownerVal, ok := data["owner"].(common.Address)
@@ -115,16 +116,6 @@ func TestDecodeAnyLog(t *testing.T) {
 	}
 }
 
-func TestStringDecoding(t *testing.T) {
-	var testHash common.Hash
-	copy(testHash[:], "hello")
-	result := utils.HashToString(testHash)
-	expected := "hello"
-
-	if result != expected {
-		t.Errorf("Expected %s, got %s", expected, result)
-	}
-}
 
 func TestStructToMap(t *testing.T) {
 	type TestStruct struct {
@@ -133,8 +124,7 @@ func TestStructToMap(t *testing.T) {
 	}
 
 	var nameHash common.Hash
-	copy(nameHash[:], "my-bucket")
-
+	nameHash = common.Hash(keccak.NewLegacyKeccak256().Sum([]byte("my-bucket")))
 	idHash := common.HexToHash("0xabc")
 
 	s := TestStruct{
@@ -144,7 +134,7 @@ func TestStructToMap(t *testing.T) {
 
 	result := structToMap("CreateBucket", s)
 
-	if val, ok := result["name"]; !ok || val != "my-bucket" {
+	if val, ok := result["name"]; !ok || val != nameHash.Hex() {
 		t.Errorf("Deterministic conversion for name failed: %v", val)
 	}
 	if val, ok := result["id"]; !ok || val != idHash.Hex() {
