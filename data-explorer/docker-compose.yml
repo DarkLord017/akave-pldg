@@ -4,8 +4,10 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    env_file:
-      - .env
+    environment:
+      POSTGRES_USER: indexer
+      POSTGRES_PASSWORD: indexer_password
+      POSTGRES_DB: blockchain_explorer
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
@@ -26,8 +28,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    env_file:
-      - .env
+    environment:
+      DB_HOST: postgres
+      DB_USER: indexer
+      DB_PASSWORD: indexer_password
+      DB_NAME: blockchain_explorer
+      RPC_URL: https://c6-us.akave.ai/ext/bc/56g16Hr1SHQRzdM8JLm3GKYv7APVHY8T2TyeZLvDVzCaTRS7W/rpc
+      BACKFILL_FROM: "0"
+      BACKFILL_TO: "0"
+      API_ADDR: ":8080"
     ports:
       - "8080:8080"
 
