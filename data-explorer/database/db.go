@@ -590,13 +590,21 @@ func (db *DB) GetDistinctMethods(ctx context.Context) ([]string, error) {
 func (db *DB) EnsurePartition(ctx context.Context, blockNum int64) error {
     from := (blockNum / partitionSize) * partitionSize
     to := from + partitionSize
-
-    name := fmt.Sprintf("actions_p%d_%d", from/1000, to/1000) // e.g. actions_p1000_1500
+    
+	//actions_0_100k_block_brin
+	var start string
+	if from == 0 {
+		start = "0"
+	} else {
+		start = fmt.Sprintf("%dk", from/100)
+	}
+    name := fmt.Sprintf("actions_%s_%dk_block_brin", start, to/1000) // e.g. actions_p1000_1500
 
     _, err := db.conn.ExecContext(ctx, fmt.Sprintf(`
         CREATE TABLE IF NOT EXISTS %s
         PARTITION OF actions
         FOR VALUES FROM (%d) TO (%d)
+		USING INDEX BRIN (block_num)
     `, name, from, to))
     if err != nil {
         return fmt.Errorf("EnsurePartition(%d): %w", blockNum, err)
