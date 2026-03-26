@@ -29,7 +29,6 @@ func NewServer(db *database.DB, addr string) *Server {
 	// Routes.
 	r.Get("/health", handlers.Health(db))
 	r.Get("/methods", handlers.Methods(db))
-	r.Get("/contracts", handlers.Contracts(db))
 	r.Get("/actions", handlers.ListActions(db))
 	r.Get("/actions/{blockNum}/{id}", handlers.GetAction(db))
 

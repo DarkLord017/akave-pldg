@@ -12,6 +12,8 @@ import (
 	_ "github.com/lib/pq"
 )
 
+var partitionSize int64 = 100000
+
 type Config struct {
 	Host     string
 	Port     int
@@ -71,10 +73,6 @@ func (db *DB) Close() error {
 		return db.conn.Close()
 	}
 	return nil
-}
-
-func (db *DB) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
-	return db.conn.BeginTx(ctx, opts)
 }
 
 func (db *DB) InsertBlock(ctx context.Context, block *utils.Block) error {
@@ -570,4 +568,38 @@ func (db *DB) CountActionsByBlock(ctx context.Context, blockNum uint64) (int, er
     ).Scan(&n)
     return n, err
 }
- 
+
+func (db *DB) GetDistinctMethods(ctx context.Context) ([]string, error) {
+	rows, err := db.conn.QueryContext(ctx, `SELECT DISTINCT method FROM actions WHERE method IS NOT NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("GetDistinctMethods query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var methods []string
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, fmt.Errorf("GetDistinctMethods scan: %w", err)
+		}
+		methods = append(methods, m)
+	}
+	return methods, rows.Err()
+}
+
+func (db *DB) EnsurePartition(ctx context.Context, blockNum int64) error {
+    from := (blockNum / partitionSize) * partitionSize
+    to := from + partitionSize
+
+    name := fmt.Sprintf("actions_p%d_%d", from/1000, to/1000) // e.g. actions_p1000_1500
+
+    _, err := db.conn.ExecContext(ctx, fmt.Sprintf(`
+        CREATE TABLE IF NOT EXISTS %s
+        PARTITION OF actions
+        FOR VALUES FROM (%d) TO (%d)
+    `, name, from, to))
+    if err != nil {
+        return fmt.Errorf("EnsurePartition(%d): %w", blockNum, err)
+    }
+    return nil
+}

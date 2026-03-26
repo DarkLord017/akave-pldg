@@ -78,6 +78,7 @@ CREATE INDEX actions_to_idx ON actions (to_addr) WHERE to_addr IS NOT NULL;
 -- GIN indexes for JSONB queries
 CREATE INDEX actions_tx_params_gin ON actions USING GIN (tx_params jsonb_path_ops) WHERE tx_params IS NOT NULL;
 CREATE INDEX actions_events_gin ON actions USING GIN (events jsonb_path_ops) WHERE events IS NOT NULL;
+CREATE INDEX actions_events_gin_contain   ON actions USING GIN (events) WHERE events IS NOT NULL;
 
 -- Transactions that could not be decoded during block processing.
 -- Kept separate so the main actions table is never polluted with partial rows.

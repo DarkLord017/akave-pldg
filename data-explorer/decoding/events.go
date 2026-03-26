@@ -108,19 +108,8 @@ func structToMap(eventName string, s interface{}) map[string]interface{} {
 
 		key := strings.Split(field.Tag.Get("json"), ",")[0]
 
-		var abiArg abi.Argument
-		var found bool
-		if arg, ok := abiInputs[key]; ok {
-			abiArg = arg
-			found = true
-		}
-
 		if hash, ok := fieldVal.Interface().(common.Hash); ok {
-			if found && abiArg.Type.T == abi.StringTy {
-				result[key] = utils.HashToString(hash)
-			} else {
-				result[key] = hash.Hex()
-			}
+			result[key] = hash.Hex()
 		} else {
 			result[key] = fieldVal.Interface()
 		}

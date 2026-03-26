@@ -13,6 +13,9 @@ type FilterParams struct {
 	Contract   string
 	TxParamKey string
 	TxParamVal string
+	EventName string
+	EventDataKey string
+	EventDataVal string
 	FromBlock  int64
 	ToBlock    int64
 	FromTime   time.Time
@@ -34,9 +37,16 @@ func ParseFilterParams(r *http.Request) (FilterParams, []string) {
 	fp.TxParamKey = q.Get("tx_param_key")
 	fp.TxParamVal = q.Get("tx_param_val")
 	fp.Cursor = q.Get("cursor")
+	fp.EventName = q.Get("event_name")
+	fp.EventDataKey = q.Get("event_data_key")
+	fp.EventDataVal = q.Get("event_data_val")
 
 	if fp.TxParamKey != "" && fp.TxParamVal == "" {
 		errs = append(errs, "tx_param_val is required when tx_param_key is set")
+	}
+
+	if fp.EventDataKey != "" && fp.EventDataVal == "" {
+		errs = append(errs, "event_data_val is required when event_data_key is set")
 	}
 
 	if v := q.Get("from_block"); v != "" {
