@@ -214,7 +214,9 @@ func (db *DB) ListActions(ctx context.Context, f ActionFilter, after *CursorVal,
 	if err != nil {
 		return ListActionsResult{}, fmt.Errorf("ListActions query: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+	_ = rows.Close()
+	}()
 
 	var result []ActionRow
 	for rows.Next() {
