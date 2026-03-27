@@ -34,7 +34,7 @@ You get:
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 Akave Public RPC
@@ -47,6 +47,7 @@ Akave Public RPC
 ```
 
 ### Indexer (Go)
+
 - Connects to the Akave public RPC endpoint
 - Tracks latest indexed block with reorg-safe windowing
 - Filters transactions to `Storage.sol` contract address
@@ -54,22 +55,23 @@ Akave Public RPC
 - Decodes input parameters and emitted events into typed structures
 
 ### Database
+
 - PostgreSQL (preferred) or SQLite for MVP
 - Core tables: `contracts`, `methods`, `events`, `actions`, `indexing_state`
 
-### API Layer
-- REST endpoints for querying decoded storage activity
+### API Endpoints
 
-```
-GET /actions?method=upload&fromBlock=...
-GET /actions/blocknumber/txnumber
-GET /methods
-GET /contracts
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/actions?method=<methodName>` | Transactions by method |
+| GET | `/actions?paramKey=<key>&paramValue=<value>` | Transactions by decoded parameter (supports nested params) |
+| GET | `/actions?event_name=<eventName>` | Events by event name |
+| GET | `/actions?event_data_key=<key>&event_data_val=<value>` | Events by decoded parameter |
+| GET | `/actions?from=<startBlock>&to=<endBlock>` | Complete block range |
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
@@ -80,7 +82,7 @@ GET /contracts
 ### Network Info
 
 | Resource | Value |
-|---|---|
+|----------|-------|
 | Public RPC | `https://c6-us.akave.ai/ext/bc/56g16Hr1SHQRzdM8JLm3GKYv7APVHY8T2TyeZLvDVzCaTRS7W/rpc` |
 | Explorer (Blockscout) | https://explorer.akave.ai |
 | Faucet | https://faucet.akave.ai |
@@ -92,12 +94,30 @@ GET /contracts
 git clone https://github.com/DarkLord017/akave-pldg.git
 cd akave-pldg/data-explorer
 
-# docker
-make docker-build
-make docker-run
+# Create a .env file with the required environment variables
+cat > .env <<EOF
+POSTGRES_USER=indexer
+POSTGRES_PASSWORD=indexer_password
+POSTGRES_DB=blockchain_explorer
+DB_HOST=postgres
+DB_USER=indexer
+DB_PASSWORD=indexer_password
+DB_NAME=blockchain_explorer
+RPC_URL=https://c6-us.akave.ai/ext/bc/56g16Hr1SHQRzdM8JLm3GKYv7APVHY8T2TyeZLvDVzCaTRS7W/rpc
+BACKFILL_FROM=0
+BACKFILL_TO=0
+API_ADDR=:8080
+EOF
+
+# Build and run with Docker
+make start
 ```
 
-## 🔗 Resources
+> This RPC URL is exposed to allow open contribution while the project is under active development.
+
+---
+
+## Resources
 
 - [Storage.sol ABI](https://github.com/akave-ai/akavesdk/blob/main/private/ipc/contracts/storage.go#L75)
 - [Akave Docs](https://docs.akave.ai)
