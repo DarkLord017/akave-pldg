@@ -71,6 +71,18 @@ Akave Public RPC
 | GET | `/actions?event_data_key=<key>&event_data_val=<value>` | Events by decoded parameter |
 | GET | `/actions?from=<startBlock>&to=<endBlock>` | Complete block range |
 
+### Demo Photos 
+- View complete txn
+<img width="1469" height="878" alt="Screenshot 2026-03-27 at 8 25 55 PM" src="https://github.com/user-attachments/assets/0f148395-3524-402b-a7b7-27d8766dfdc9" />
+- Filter by tx parameters 
+<img width="1469" height="878" alt="Screenshot 2026-03-27 at 8 26 15 PM" src="https://github.com/user-attachments/assets/7eed1027-9011-451b-be87-12187e2c5eb1" />
+- Filter by event name 
+<img width="1469" height="878" alt="Screenshot 2026-03-27 at 8 26 57 PM" src="https://github.com/user-attachments/assets/07d17476-3df6-4661-95b2-52ece5e4403f" />
+- Filter by event params
+<img width="1469" height="878" alt="Screenshot 2026-03-27 at 8 27 33 PM" src="https://github.com/user-attachments/assets/b909d395-8d19-4514-b6f7-45358a0d144b" />
+- Filter by blocks 
+<img width="1469" height="878" alt="Screenshot 2026-03-27 at 8 28 13 PM" src="https://github.com/user-attachments/assets/a49c7312-b865-4fc9-88ba-99cb942763fc" />
+
 ---
 
 ## Getting Started
@@ -116,6 +128,10 @@ make start
 ```
 
 > This RPC URL is exposed to allow open contribution while the project is under active development.
+# Things left to do at the end of cohort
+- E2E testing
+- db optimisations
+- frontend & analytics
 
 ---
 
