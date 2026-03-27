@@ -1,3 +1,5 @@
+[![data-explorer CI](https://github.com/DarkLord017/akave-pldg/actions/workflows/data-explorer-ci.yml/badge.svg?branch=main)](https://github.com/DarkLord017/akave-pldg/actions/workflows/data-explorer-ci.yml)
+
 # Data Explorer — Storage.sol-Aware Blockchain Indexer for Akave
 
 A domain-specific indexer and API built on top of the Akave public RPC that translates raw `Storage.sol` contract activity into human-readable, queryable storage actions — uploads, updates, deletions, registrations — instead of generic transactions.
